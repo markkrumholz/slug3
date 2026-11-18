@@ -29,6 +29,15 @@ H-bucket's -- unlike the pre-split single powr_wnl.h5, these are three
 separate files/registry entries (one per WRType::WNLH20/WNLH40/WNLH60),
 with no xh axis or per-group xh attribute at all (see fetch_powr.py).
 
+POWR_SPARSE_test.h5 (for the WNE-type registry entry POWR_WNE_SPARSE_test)
+is instead built to check *which* grid point SpecsynLibWR::specForce()
+picks, so every model in it has its own distinct SED peak wavelength and
+logl (see sparse_model()). Its [Fe/H] = 0 group fills the whole
+(log_rt, log_teff) grid, while its [Fe/H] = -1 group leaves the outermost
+log_rt row (SPARSE_LOG_RT_VALS[-1]) empty and also omits one interior
+point (SPARSE_MISSING_FEHM1) -- so at [Fe/H] = -1 a search toward
+log_rt = +inf has to skip the empty row, and then the missing point.
+
 Run from the repository root: python3 data/tools/spectra/make_powr_test_fixture.py
 
 :copyright: Copyright (c) 2026 Mark Krumholz
@@ -105,3 +114,45 @@ for suffix, wl0 in (("H20", WL0_H20), ("H40", WL0_H40), ("H60", WL0_H60)):
     write_simple_powr_fixture(
         f"tests/specsyn/assets/POWR_WNL_{suffix}_test.h5", wave, flux_wnl)
     print(f"  {suffix} SED peaked at wl0 = {wl0} Angstrom")
+
+
+# POWR_SPARSE_test.h5: the sparse, every-point-distinct WNE-type fixture
+# (POWR_WNE_SPARSE_test) -- see this module's own docstring
+SPARSE_LOG_TEFF_VALS = [4.6, 4.7, 4.8]
+SPARSE_LOG_RT_VALS = [0.5, 1.0, 1.5]
+SPARSE_MISSING_FEHM1 = (1.0, 4.7)   # (log_rt, log_teff) omitted at [Fe/H] = -1
+
+
+def sparse_model(feh, i_rt, i_teff):
+    """SED peak wavelength (Angstrom) and logl of the POWR_SPARSE_test.h5
+    model at [Fe/H] = feh and grid indices (i_rt, i_teff): 1500 Angstrom
+    and 0.1 dex apart for every step in the flattened index
+    3 * i_rt + i_teff, with the [Fe/H] = 0 group's peaks offset by a
+    further 750 Angstrom, so that no two models share either value.
+    tests/specsyn/testSpecsynLibWR.cpp's testSpecForceSelectsNearestPoint
+    hard-codes the values this gives for the points it expects.
+    """
+    k = 3 * i_rt + i_teff
+    wl0 = 2000.0 + 1500.0 * k + (750.0 if feh == 0.0 else 0.0)
+    return wl0, 5.0 + 0.1 * k
+
+
+with h5py.File("tests/specsyn/assets/POWR_SPARSE_test.h5", "w") as h5:
+    for feh in FEH_VALS:
+        grp = h5.create_group(f"feh_{feh:+.2f}")
+        grp.attrs["feh"] = feh
+        grp.attrs["dinf"] = DINF
+        for i_rt, log_rt in enumerate(SPARSE_LOG_RT_VALS):
+            for i_teff, log_teff in enumerate(SPARSE_LOG_TEFF_VALS):
+                if feh == -1.0 and (log_rt == SPARSE_LOG_RT_VALS[-1] or
+                                    (log_rt, log_teff) == SPARSE_MISSING_FEHM1):
+                    continue
+                wl0, logl = sparse_model(feh, i_rt, i_teff)
+                name = f"logt{log_teff:.2f}_logrt{log_rt:.2f}"
+                ds = grp.create_dataset(name, data=make_flux(wave, wl0, logl),
+                                        compression="gzip")
+                ds.attrs["log_teff"] = log_teff
+                ds.attrs["log_rt"] = log_rt
+                ds.attrs["logl"] = logl
+                grp.create_dataset(f"{name}_wave", data=wave, compression="gzip")
+print("wrote tests/specsyn/assets/POWR_SPARSE_test.h5")

@@ -825,6 +825,170 @@ static auto testSpecNegativeZThrows() -> int
     return result;
 }
 
+// A star with zero mass-loss rate but a finite, nonzero wind velocity
+// (nugis_lamers_00 clamps its velocity into a finite range, so mdot =
+// 0 alone does this) has an infinite transformed radius, so
+// computeRawLogRt() returns log(R_t) = +inf. computeRawLogRt()'s own
+// contract is that this is not an error: the caller moves it to the
+// nearest populated grid value. Both spec() (for a star inside the
+// log(Teff) grid) and specForce() (for one far outside it, as
+// SpecsynLibChained calls it once every library has rejected the star)
+// must honor that and return a full, finite spectrum at the star's own
+// luminosity. specForce() used to throw instead ("no populated
+// (log(R_t), log(Teff)) grid point found"), since every Euclidean
+// distance to an infinite target is itself infinite, so none ever
+// compared below its search's initial best distance of +inf.
+static auto testSpecInfiniteLogRt() -> int
+{
+    const auto& nlControls = controlsWithWinds<feedback::WRwindModel::nugisLamers00_>();
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+    constexpr double starLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
+
+    // A spectrum must be full size, all finite, and peak (in wl *
+    // spec) within a few orders of magnitude of the star's own
+    // luminosity, as in testSpecWNESuccess
+    const auto checkSpectrum = [&lib, starLuminosity](
+        const std::vector<double>& spectrum, const char* label) -> int
+    {
+        if (spectrum.size() != lib.wl().size() ||
+            !std::ranges::all_of(spectrum, [](const double v) -> bool { return std::isfinite(v); }))
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt (" << label
+                << "): expected a full-size, all-finite spectrum\n";
+            return 1;
+        }
+        double maxWlSpec = 0.0;
+        for (std::size_t i = 0; i < spectrum.size(); ++i)
+        {
+            maxWlSpec = std::max(maxWlSpec, spectrum.at(i) * lib.wl().at(i));
+        }
+        if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt (" << label
+                << "): max(wl * spec) = " << maxWlSpec << " erg/s is unreasonably "
+                "far from the star's own luminosity = " << starLuminosity << " erg/s\n";
+            return 1;
+        }
+        return 0;
+    };
+
+    int result = 0;
+    // log(Teff) = 4.7 (inside the grid) for spec(); 6.0 (far outside
+    // it) for specForce(), which is what SpecsynLibChained falls back
+    // on for such a star
+    const auto inGridProps = makeWRStarData(20.0, 5.7, 4.7, 0.0);
+    const auto offGridProps = makeWRStarData(20.0, 5.7, 6.0, 0.0);
+    try
+    {
+        result += checkSpectrum(lib.spec(inGridProps, -0.5), "spec()");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt: spec() threw "
+            "unexpectedly: " << e.what() << "\n";
+        result += 1;
+    }
+    for (const auto* props : { &inGridProps, &offGridProps })
+    {
+        try
+        {
+            result += checkSpectrum(lib.specForce(*props, -0.5), "specForce()");
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt: specForce() threw "
+                "unexpectedly: " << e.what() << "\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
+// testSpecInfiniteLogRt checks only that an infinite log(R_t) yields
+// *a* spectrum; POWR_WNE_test's identical grid points can't show which
+// one. POWR_WNE_SPARSE_test (see make_powr_test_fixture.py) gives every
+// model its own SED peak wavelength and logl, and at [Fe/H] = -1 leaves
+// its outermost log(R_t) = 1.5 row empty and omits the (log(R_t),
+// log(Teff)) = (1.0, 4.7) point. So for a log(R_t) = +inf star at
+// [Fe/H] = -1, specForce() must skip the empty row, use the log(R_t) =
+// 1.0 row, and pick that row's populated log(Teff) nearest the star's:
+// 4.8 for log(Teff) = 4.72 (4.7 being missing), and 4.6 for 4.62. The
+// result must be that one model's SED, rescaled to the star's own
+// luminosity: a Gaussian of width 500 Angstrom centered on the model's
+// own peak wavelength, whose wl * F peaks at the star's luminosity.
+static auto testSpecForceSelectsNearestPoint() -> int
+{
+    const auto& nlControls = controlsWithWinds<feedback::WRwindModel::nugisLamers00_>();
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        "POWR_WNE_SPARSE_test", -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+
+    // The fixture's own solar luminosity and SED width (see
+    // make_powr_test_fixture.py's SOLAR_LUM and SIGMA)
+    constexpr double fixtureSolarLum = 3.828e33;
+    constexpr double sigma = 500.0;
+    constexpr double starLogL = 5.7;
+    const double starLum = std::pow(10.0, starLogL) * fixtureSolarLum;
+
+    struct Case
+    {
+        double logTeff_;
+        double expectedWl0_; // peak wavelength of the model specForce() should pick
+    };
+    // sparse_model(-1, 1, 2) and sparse_model(-1, 1, 0), respectively
+    const std::array<Case, 2> cases{ { { 4.72, 9500.0 }, { 4.62, 6500.0 } } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const auto props = makeWRStarData(20.0, starLogL, c.logTeff_, 0.0);
+        std::vector<double> spectrum;
+        try
+        {
+            spectrum = lib.specForce(props, -1.0);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): specForce() threw unexpectedly: " << e.what() << "\n";
+            result += 1;
+            continue;
+        }
+        const auto& wl = lib.wl();
+        if (spectrum.size() != wl.size())
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): spectrum has the wrong size\n";
+            result += 1;
+            continue;
+        }
+        const double amplitude = starLum / c.expectedWl0_;
+        double maxErr = 0.0;
+        for (std::size_t i = 0; i < wl.size(); ++i)
+        {
+            const double x = (wl.at(i) - c.expectedWl0_) / sigma;
+            const double expected = amplitude * std::exp(-0.5 * x * x);
+            maxErr = std::max(maxErr, std::abs(spectrum.at(i) - expected));
+        }
+        // The library resamples the fixture's coarse native wavelength
+        // grid (~140 Angstrom spacing near these peaks, against a 500
+        // Angstrom SED width) onto its own, which costs < 0.5% of the
+        // peak. Any other model differs by far more: a neighboring peak
+        // wavelength is 3 sigma away (~100% of the peak), and a wrong
+        // logl rescaling is off by at least 10^0.1 (~26%).
+        constexpr double tol = 0.02;
+        if (maxErr > tol * amplitude)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): spectrum differs from the expected model's (peak "
+                "wavelength " << c.expectedWl0_ << " Angstrom, rescaled to the star's "
+                "luminosity) by up to " << maxErr / amplitude << " of its peak\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -845,5 +1009,7 @@ auto testSpecsynLibWR() -> int
     result += testRawLogRtWindModels();
     result += testSpecZeroWindSucceeds();
     result += testSpecNegativeZThrows();
+    result += testSpecInfiniteLogRt();
+    result += testSpecForceSelectsNearestPoint();
     return result;
 }

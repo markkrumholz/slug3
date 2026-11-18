@@ -142,6 +142,40 @@ namespace specsyn
         }
 
         /**
+         * @brief Find the log(Teff) grid index, within one (feh, log(R_t)) row, with a populated spectrum closest to a target log(Teff)
+         * @param grid The spectrum tensor grid (SpecsynLibWR::grid_)
+         * @param logTeff The log(Teff) values spanned by grid's own third axis
+         * @param f Index into grid's own first (feh) axis to search at
+         * @param r Index into grid's own second (log(R_t)) axis to search at
+         * @param targetLogTeff The log(Teff) value to search for the nearest match to
+         * @return The index t whose grid[f, r, t] is populated and
+         *   closest to targetLogTeff, or std::nullopt if grid[f, r, .]
+         *   is unpopulated for every t
+         * @details
+         * Used by nearestPopulatedRtTeff() for an infinite target
+         * log(R_t) -- see its own comment.
+         */
+        auto nearestPopulatedTeffInRow( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const std::mdspan<std::vector<double>, std::dextents<std::size_t, 3>>& grid, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
+            const std::vector<double>& logTeff, const size_t f, const size_t r,
+            const double targetLogTeff) -> std::optional<size_t>
+        {
+            std::optional<size_t> best;
+            double bestDist = std::numeric_limits<double>::infinity();
+            for (size_t t = 0; t < logTeff.size(); ++t)
+            {
+                if (grid[f, r, t].empty()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, r, t all < the corresponding axis's size by construction
+                const double dist = std::abs(logTeff[t] - targetLogTeff); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < logTeff.size() by the loop bound
+                if (!best || dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = t;
+                }
+            }
+            return best;
+        }
+
+        /**
          * @brief Find the (log(R_t), log(Teff)) grid indices, at a given feh index, with a populated spectrum closest to a target point
          * @param grid The spectrum tensor grid (SpecsynLibWR::grid_)
          * @param logRt The log(R_t) values spanned by grid's own second axis
@@ -158,6 +192,20 @@ namespace specsyn
          * Factored out of SpecsynLibWR::specForce() purely to keep its
          * own cognitive complexity down -- see its own comment for how
          * this is used.
+         *
+         * targetLogRt may be infinite: computeRawLogRt() returns +inf
+         * for a star with zero mdot but a finite, nonzero wind, and
+         * documents that as valid, to be moved to the nearest populated
+         * grid value. Every Euclidean distance to such a target is
+         * itself infinite, so none would ever compare below the
+         * search's own initial best distance of +inf, and this would
+         * wrongly report the slice as unpopulated. Instead, take the
+         * search's own limit as targetLogRt goes to +/-inf: the log(R_t)
+         * offset then outweighs any log(Teff) one, so the nearest point
+         * lies on the most extreme populated log(R_t) row on that side
+         * (logRt is ascending, as for every grid axis), at whichever of
+         * that row's populated log(Teff) values is closest to
+         * targetLogTeff.
          */
         auto nearestPopulatedRtTeff( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const std::mdspan<std::vector<double>, std::dextents<std::size_t, 3>>& grid, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
@@ -165,6 +213,19 @@ namespace specsyn
             const size_t f, const double targetLogRt, const double targetLogTeff)
             -> std::optional<std::pair<size_t, size_t>>
         {
+            if (std::isinf(targetLogRt))
+            {
+                for (size_t k = 0; k < logRt.size(); ++k)
+                {
+                    const size_t r = (targetLogRt > 0.0) ? logRt.size() - 1 - k : k;
+                    if (const auto t = nearestPopulatedTeffInRow(grid, logTeff, f, r, targetLogTeff))
+                    {
+                        return std::pair<size_t, size_t>{ r, *t };
+                    }
+                }
+                return std::nullopt;
+            }
+
             bool found = false;
             double bestDist = std::numeric_limits<double>::infinity();
             size_t bestR = 0;
