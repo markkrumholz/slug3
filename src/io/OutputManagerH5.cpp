@@ -73,18 +73,20 @@ static auto findMaxCheckpointNumber(const std::filesystem::path& dir,
 
     for (const auto& entry : std::filesystem::directory_iterator(dir))
     {
+        // Filter by name before asking for any entry's type, which can
+        // fail (e.g. on a symlink loop) for entries that are nothing to
+        // do with this run -- dir is often a whole working directory
+        const auto name = entry.path().filename().string();
+        if (!name.starts_with(prefix)) { continue; }
+
         std::string suffix;
-        if (entry.is_regular_file() && entry.path().extension() == ".h5")
+        if (entry.path().extension() == ".h5" && entry.is_regular_file())
         {
-            const auto stem = entry.path().stem().string();
-            if (!stem.starts_with(prefix)) { continue; }
-            suffix = stem.substr(prefix.size());
+            suffix = entry.path().stem().string().substr(prefix.size());
         }
         else if (entry.is_directory())
         {
-            const auto dirName = entry.path().filename().string();
-            if (!dirName.starts_with(prefix)) { continue; }
-            suffix = dirName.substr(prefix.size());
+            suffix = name.substr(prefix.size());
         }
         else { continue; }
 
@@ -763,9 +765,10 @@ auto io::OutputManagerH5::checkpointModelName(const unsigned long checkpointNum)
 auto io::OutputManagerH5::restartHint() const -> std::string
 {
     if (!restartFoundNoCheckpointIn_.has_value()) { return ""; }
-    return " (--restart was requested, but found no checkpoint of model " +
+    return " (--restart was requested, but found no usable checkpoint of model " +
         simControls_.modelName() + " in " + restartFoundNoCheckpointIn_->string() +
-        "; check that out_dir and model_name match the run being restarted)";
+        ", so this run started from trial 0; if the run being restarted wrote "
+        "checkpoints, check that out_dir and model_name match it)";
 }
 
 // See this method's own header comment for the full design
@@ -832,6 +835,11 @@ void io::OutputManagerH5::openNewOutputFiles()
     }
     openOutputFile(finalPath);
 #endif
+
+    // This run has now written output of its own, so a later "already
+    // exists" error (at a checkpoint rollover) has nothing to do with
+    // what the restart's search found -- see restartHint()
+    restartFoundNoCheckpointIn_.reset();
 }
 
 // Create one HDF5 file at path, write its header (slug-hash, date,

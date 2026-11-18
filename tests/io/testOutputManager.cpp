@@ -4827,7 +4827,7 @@ static auto testRestartWithDefaultOutDir() -> int
     }
     catch (const std::runtime_error& e)
     {
-        if (!std::string_view(e.what()).contains("--restart was requested, but found no checkpoint"))
+        if (!std::string_view(e.what()).contains("--restart was requested, but found no usable checkpoint"))
         {
             std::cerr << "testOutputManager: restart default out_dir: the \"already "
                 "exists\" error does not mention the restart: " << e.what() << "\n";

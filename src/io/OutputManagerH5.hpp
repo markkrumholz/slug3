@@ -517,14 +517,18 @@ namespace io
         /**
          * @brief Explain an "already exists" error in terms of a restart that found nothing
          * @return An empty string unless restartSetup() found no
-         *   checkpoint to resume from (see restartFoundNoCheckpointIn_);
-         *   otherwise a parenthetical saying so, naming the directory
-         *   searched, for openNewOutputFiles() to append to its error
+         *   checkpoint to resume from and this run has not yet opened
+         *   any output (see restartFoundNoCheckpointIn_); otherwise a
+         *   parenthetical saying so, naming the directory searched, for
+         *   openNewOutputFiles() to append to its error
          * @details
-         * If --restart found no checkpoint, and the first checkpoint
-         * this run then tries to write already exists, the restart's
-         * search and the writer disagree about where the run's output
-         * lives -- which "already exists" alone does not suggest.
+         * If --restart found no usable checkpoint, and the first output
+         * this run then tries to write already exists, the path is
+         * taken by something the search did not recognize as a
+         * checkpoint of this run. "Already exists" alone suggests only
+         * that --restart was forgotten, so this says what the search
+         * found, and suggests checking out_dir and model_name -- one
+         * possible cause, though not the only one.
          */
         [[nodiscard]] auto restartHint() const -> std::string;
 
@@ -938,9 +942,11 @@ namespace io
         // The directory restartSetup() searched, made absolute where
         // possible, if this OutputManagerH5 was constructed with
         // restart = true but found no checkpoint there to resume from;
-        // std::nullopt otherwise. Set once, by noteNoCheckpointFound(),
-        // before openNewOutputFiles() is ever called, and read only by
-        // restartHint() -- see its own comment.
+        // std::nullopt otherwise. Set by noteNoCheckpointFound() before
+        // openNewOutputFiles() is first called, read only by
+        // restartHint(), and cleared once that first call has opened
+        // this run's own output -- see restartHint()'s own comment.
+        // Only ever touched from outside any parallel region.
         std::optional<std::filesystem::path> restartFoundNoCheckpointIn_;
 
         // Set by notifyEarlyTermination(), from outside any active
