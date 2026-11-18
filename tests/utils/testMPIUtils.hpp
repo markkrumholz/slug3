@@ -174,7 +174,10 @@ inline auto testMPIUtilsAgreedError() -> int
         return 1;
     }
 
-    // A rank that did not have the error throws a generic one
+    // A rank that did not have the error throws a generic one, and must
+    // mark the error agreed just the same (checked from a cleared flag,
+    // so the local-error case above cannot mask it)
+    utils::detail::errorAgreedFlag() = false;
     try
     {
         utils::rethrowAgreedError(nullptr);
@@ -187,6 +190,12 @@ inline auto testMPIUtilsAgreedError() -> int
                 "exception_ptr: " << e.what() << "\n";
             return 1;
         }
+    }
+    if (!utils::errorIsAgreed())
+    {
+        std::cerr << "testMPIUtilsAgreedError: errorIsAgreed() should be true "
+            "after rethrowAgreedError(nullptr)\n";
+        return 1;
     }
     return 0;
 }

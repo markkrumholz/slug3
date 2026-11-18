@@ -262,7 +262,10 @@ def run_slug_expecting_failure(deck_path, nranks, extra_env):
         try:
             stdout, stderr = proc.communicate(timeout=30)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # the launcher's group is already gone; just report below
             try:
                 stdout, stderr = proc.communicate(timeout=30)
             except subprocess.TimeoutExpired:

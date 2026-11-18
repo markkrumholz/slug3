@@ -706,10 +706,26 @@ void io::OutputManagerH5::restartSetup() // NOLINT(readability-function-cognitiv
 void io::OutputManagerH5::checkpoint(const unsigned long trialsCompleted)
 {
 #ifdef _OPENMP
+    // An exception must not escape an OpenMP parallel region (that
+    // terminates the process, before main() could report the error or
+    // abort the other MPI ranks), so each thread's is caught here, and
+    // the first rethrown once the team has joined
+    std::exception_ptr closeError;
 #pragma omp parallel
     {
-        closeOutputFile(trialsCompleted);
+        try
+        {
+            closeOutputFile(trialsCompleted);
+        }
+        catch (...)
+        {
+#pragma omp critical
+            {
+                if (!closeError) { closeError = std::current_exception(); }
+            }
+        }
     }
+    if (closeError) { std::rethrow_exception(closeError); }
 #else
     closeOutputFile(trialsCompleted);
 #endif
