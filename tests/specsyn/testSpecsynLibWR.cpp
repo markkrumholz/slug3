@@ -825,6 +825,86 @@ static auto testSpecNegativeZThrows() -> int
     return result;
 }
 
+// A star with zero mass-loss rate but a finite, nonzero wind velocity
+// (nugis_lamers_00 clamps its velocity into a finite range, so mdot =
+// 0 alone does this) has an infinite transformed radius, so
+// computeRawLogRt() returns log(R_t) = +inf. computeRawLogRt()'s own
+// contract is that this is not an error: the caller moves it to the
+// nearest populated grid value. Both spec() (for a star inside the
+// log(Teff) grid) and specForce() (for one far outside it, as
+// SpecsynLibChained calls it once every library has rejected the star)
+// must honor that and return a full, finite spectrum at the star's own
+// luminosity. specForce() used to throw instead ("no populated
+// (log(R_t), log(Teff)) grid point found"), since every Euclidean
+// distance to an infinite target is itself infinite, so none ever
+// compared below its search's initial best distance of +inf.
+static auto testSpecInfiniteLogRt() -> int
+{
+    const auto& nlControls = controlsWithWinds<feedback::WRwindModel::nugisLamers00_>();
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+    constexpr double starLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
+
+    // A spectrum must be full size, all finite, and peak (in wl *
+    // spec) within a few orders of magnitude of the star's own
+    // luminosity, as in testSpecWNESuccess
+    const auto checkSpectrum = [&lib, starLuminosity](
+        const std::vector<double>& spectrum, const char* label) -> int
+    {
+        if (spectrum.size() != lib.wl().size() ||
+            !std::ranges::all_of(spectrum, [](const double v) -> bool { return std::isfinite(v); }))
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt (" << label
+                << "): expected a full-size, all-finite spectrum\n";
+            return 1;
+        }
+        double maxWlSpec = 0.0;
+        for (std::size_t i = 0; i < spectrum.size(); ++i)
+        {
+            maxWlSpec = std::max(maxWlSpec, spectrum.at(i) * lib.wl().at(i));
+        }
+        if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt (" << label
+                << "): max(wl * spec) = " << maxWlSpec << " erg/s is unreasonably "
+                "far from the star's own luminosity = " << starLuminosity << " erg/s\n";
+            return 1;
+        }
+        return 0;
+    };
+
+    int result = 0;
+    // log(Teff) = 4.7 (inside the grid) for spec(); 6.0 (far outside
+    // it) for specForce(), which is what SpecsynLibChained falls back
+    // on for such a star
+    const auto inGridProps = makeWRStarData(20.0, 5.7, 4.7, 0.0);
+    const auto offGridProps = makeWRStarData(20.0, 5.7, 6.0, 0.0);
+    try
+    {
+        result += checkSpectrum(lib.spec(inGridProps, -0.5), "spec()");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt: spec() threw "
+            "unexpectedly: " << e.what() << "\n";
+        result += 1;
+    }
+    for (const auto* props : { &inGridProps, &offGridProps })
+    {
+        try
+        {
+            result += checkSpectrum(lib.specForce(*props, -0.5), "specForce()");
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecInfiniteLogRt: specForce() threw "
+                "unexpectedly: " << e.what() << "\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -845,5 +925,6 @@ auto testSpecsynLibWR() -> int
     result += testRawLogRtWindModels();
     result += testSpecZeroWindSucceeds();
     result += testSpecNegativeZThrows();
+    result += testSpecInfiniteLogRt();
     return result;
 }
