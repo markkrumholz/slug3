@@ -10,6 +10,7 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "../utils/MPIUtils.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "Galaxy.hpp"
 #include <algorithm>
@@ -17,6 +18,8 @@
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 // See SimCluster.cpp's own identical helper for why this exists and
@@ -38,7 +41,9 @@ core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
     simControls_(simControls),
     outputManager_(std::move(outputManager)),
-    restart_(restart)
+    restart_(restart),
+    testFailTrial_(utils::getEnvULong("SLUG_TEST_FAIL_TRIAL")),
+    testFailRank_(utils::getEnvULong("SLUG_TEST_FAIL_RANK"))
 {
 }
 
@@ -46,6 +51,13 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
 {
     // See SimCluster::runTrial()'s own identical comment
     if (utils::sigtermWasReceived()) { return; }
+
+    // Test-only fault injection; see testFailTrial_'s own comment
+    if (testFailTrial_ == trialNum)
+    {
+        throw std::runtime_error("injected test failure (SLUG_TEST_FAIL_TRIAL = " +
+            std::to_string(trialNum) + ")");
+    }
 
     if (simControls_.verbosity() > 1)
     {
@@ -82,6 +94,47 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
     }
 
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
+}
+
+// See SimCluster::runBatch()'s own header comment
+auto core::SimGalaxy::runBatch(const unsigned long rankBatchStart, const unsigned long rankBatchEnd)
+    -> std::exception_ptr
+{
+    // See SimCluster::runBatch()'s own identical comment
+    std::exception_ptr firstError;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+    for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+    {
+        try
+        {
+            runTrial(trialNum);
+        }
+        catch (const std::exception& error)
+        {
+#pragma omp critical
+            {
+                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                if (!firstError) { firstError = std::current_exception(); }
+            }
+        }
+    }
+#else
+    for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+    {
+        try
+        {
+            runTrial(trialNum);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+            firstError = std::current_exception();
+            break;
+        }
+    }
+#endif
+    return firstError;
 }
 
 auto core::SimGalaxy::run() -> int
@@ -142,64 +195,20 @@ auto core::SimGalaxy::run() -> int
             std::min(batchStart + batchSize, numberingEnd);
 
         // See SimCluster::run()'s own identical comment
-        // (including why this is not a structured binding)
-        const auto rankBatch = utils::mpiPartitionRange(batchStart, batchEnd);
-        const unsigned long rankBatchStart = rankBatch.first;
-        const unsigned long rankBatchEnd = rankBatch.second;
+        const auto [rankBatchStart, rankBatchEnd] = utils::mpiPartitionRange(batchStart, batchEnd);
+        const std::exception_ptr firstError = runBatch(rankBatchStart, rankBatchEnd);
 
-#ifdef _OPENMP
-        // See runTrial()'s own comment for why each trial is
-        // individually wrapped in a try/catch here, rather than
-        // letting an exception propagate out of the "#pragma omp
-        // parallel for" loop body directly: every trial in this batch
-        // still runs (so one bad trial does not lose every other
-        // thread's own in-flight work), and the first exception
-        // caught is remembered and rethrown once the whole batch's
-        // own parallel region has finished, so run()'s own caller
-        // sees the same kind of failure it always has.
-        std::exception_ptr firstError;
-#pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+        // See SimCluster::run()'s own identical comments, here and on
+        // the two stop conditions below
+        const auto stop = utils::mpiAgreeBatchStop(utils::sigtermWasReceived(), firstError != nullptr);
+        if (stop.error_)
         {
-            try
-            {
-                runTrial(trialNum);
-            }
-            catch (const std::exception& error)
-            {
-#pragma omp critical
-                {
-                    std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
-                    if (!firstError) { firstError = std::current_exception(); }
-                }
-            }
-        }
-        if (firstError)
-        {
-            // See SimCluster::run()'s own identical comment
             outputManager_->notifyEarlyTermination(
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
-            std::rethrow_exception(firstError);
+            utils::rethrowAgreedError(firstError);
         }
-#else
-        try
-        {
-            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
-            {
-                runTrial(trialNum);
-            }
-        }
-        catch (...)
-        {
-            // See the identical #ifdef _OPENMP branch's own comment
-            outputManager_->notifyEarlyTermination(
-                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
-            throw;
-        }
-#endif
 
-        // See SimCluster::run()'s own identical comment
-        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
+        if (stop.sigterm_)
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
@@ -209,6 +218,15 @@ auto core::SimGalaxy::run() -> int
                 printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
+        }
+
+        // Test-only fault injection; see SimCluster::run()'s own
+        // identical comment
+        if (batchStart == numberingStart &&
+            testFailRank_ == static_cast<unsigned long>(utils::mpiRank()))
+        {
+            throw std::runtime_error("injected test failure (SLUG_TEST_FAIL_RANK = " +
+                std::to_string(utils::mpiRank()) + ")");
         }
 
         // See SimCluster::run()'s own identical comment

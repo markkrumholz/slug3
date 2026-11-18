@@ -12,7 +12,9 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include <atomic>
+#include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr; see the identical NOLINT in SimCluster.cpp
 #include <memory>
+#include <optional>
 
 namespace core
 {
@@ -75,6 +77,12 @@ namespace core
          * @return 0 if every trial completed normally; sigtermExitCode
          *   if a SIGTERM was caught and this stopped early instead
          *   (see this method's own comment)
+         * @throws The first exception any trial throws, once every
+         *   trial in its batch has finished. Under MPI, every rank
+         *   throws once any rank has a trial fail: the failing rank
+         *   rethrows its own exception, and every other rank throws
+         *   a std::runtime_error saying so (see
+         *   utils::rethrowAgreedError())
          * @details
          * Installs a handler for SIGTERM before running (restored to
          * whatever was previously installed once this returns, by any
@@ -142,10 +150,32 @@ namespace core
          */
         void runTrial(unsigned long trialNum);
 
+        /**
+         * @brief Run this rank's share of one batch of trials
+         * @param rankBatchStart First trial number to run (inclusive)
+         * @param rankBatchEnd Last trial number to run (exclusive)
+         * @return The first exception any trial threw, or a null
+         *   exception_ptr if every trial succeeded
+         * @details
+         * Factored out of run() purely to keep its own cognitive
+         * complexity down. Each failing trial's error is printed as it
+         * happens, but none is rethrown here: run() rethrows only once
+         * every MPI rank has agreed to stop (see its own comment).
+         */
+        auto runBatch(unsigned long rankBatchStart, unsigned long rankBatchEnd) -> std::exception_ptr;
+
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         std::unique_ptr<io::OutputManager> outputManager_; /**< Output manager */
         std::atomic<unsigned long> trialsCompleted_{0}; /**< Number of trials completed so far (see trialsCompleted()) */
         bool restart_ = false; /**< Whether this run is resuming a previous, interrupted run (see the constructor's own comment) */
+
+        // Fault injection for tests only (tests/mpi/test_mpi_e2e.py),
+        // read once by the constructor from environment variables that
+        // are never set in normal use. They exist because there is no
+        // way to make one particular MPI rank fail deterministically
+        // from an input deck alone.
+        std::optional<unsigned long> testFailTrial_; /**< If set (SLUG_TEST_FAIL_TRIAL), runTrial() throws for this trial number instead of running it */
+        std::optional<unsigned long> testFailRank_; /**< If set (SLUG_TEST_FAIL_RANK), run() throws on this MPI rank alone at the end of its first batch, outside the end-of-batch agreement every rank makes (see run()) */
     };
 
 } // namespace core

@@ -1,7 +1,7 @@
 /**
  * @file testGetFilePath.hpp
  * @author Mark Krumholz
- * @brief Unit tests for utils::getFilePath's SLUG_DIR/SLUG_DATA_PATH search and utils::splitSearchPath
+ * @brief Unit tests for utils::getFilePath's SLUG_DIR/SLUG_DATA_PATH search, utils::splitSearchPath, and utils::getEnvULong
  * @date 2026-10-06
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -10,11 +10,14 @@
 #define TESTGETFILEPATH_HPP
 
 #include "../../src/utils/MiscUtils.hpp"
+#include <array>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -142,6 +145,64 @@ inline auto testGetFilePathDataPath() -> int
     }
 
     fs::remove_all(base);
+    return result;
+#endif // _WIN32
+}
+
+/**
+ * @brief Test utils::getEnvULong on unset, empty, valid, and malformed values
+ * @return 0 on success, 1 on failure
+ * @details
+ * POSIX-only, since it sets environment variables via setenv/unsetenv.
+ */
+inline auto testGetEnvULong() -> int
+{
+#ifdef _WIN32
+    return 0;
+#else
+    const std::string name = "SLUG_TEST_GET_ENV_ULONG";
+    int result = 0;
+
+    // Unset and empty both mean "not set"; a plain integer is parsed
+    const std::array<std::pair<std::optional<std::string>, std::optional<unsigned long>>, 4> good{ {
+        { std::nullopt, std::nullopt },
+        { "", std::nullopt },
+        { "0", 0UL },
+        { "3011429", 3011429UL },
+    } };
+    for (const auto& [value, expected] : good)
+    {
+        const ScopedEnv env(name, value);
+        try
+        {
+            if (utils::getEnvULong(name.c_str()) != expected)
+            {
+                std::cerr << "testGetEnvULong: wrong result for value \"" <<
+                    value.value_or("<unset>") << "\"\n";
+                result = 1;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testGetEnvULong: unexpected exception for value \"" <<
+                value.value_or("<unset>") << "\": " << e.what() << "\n";
+            result = 1;
+        }
+    }
+
+    // Anything else is an error, not silently ignored
+    for (const char* value : { "abc", "-1", "12x", " 5", "99999999999999999999999" })
+    {
+        const ScopedEnv env(name, std::string(value));
+        try
+        {
+            [[maybe_unused]] const auto parsed = utils::getEnvULong(name.c_str());
+            std::cerr << "testGetEnvULong: expected an exception for value \"" <<
+                value << "\"\n";
+            result = 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
     return result;
 #endif // _WIN32
 }

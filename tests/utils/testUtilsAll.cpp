@@ -39,6 +39,9 @@ auto main() -> int {
         result += testMPIUtilsSingleProcess();
         result += testSplitSearchPath();
         result += testGetFilePathDataPath();
+        result += testGetEnvULong();
+        // Must run last: sets process-wide state (see its own comment)
+        result += testMPIUtilsAgreedError();
         return result;
     }
     catch (const std::exception& error)

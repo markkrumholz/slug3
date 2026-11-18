@@ -11,7 +11,10 @@
 #define MPIUTILS_HPP
 
 #include <algorithm>
+#include <array> // NOLINT(misc-include-cleaner) -- only used inside mpiAgreeBatchStop()'s own #ifdef SLUG_MPI block, so a build without SLUG_MPI never actually uses it
+#include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/rethrow_exception/uncaught_exceptions; see the identical NOLINT in SimCluster.cpp
 #include <iostream> // NOLINT(misc-include-cleaner) -- only used inside initMPI()'s own #ifdef SLUG_MPI block (std::cerr, for the MPI_THREAD_FUNNELED warning), so a build without SLUG_MPI never actually uses it, the same reason <mpi.h> below needs its own identical NOLINT
+#include <stdexcept>
 #include <utility>
 
 #ifdef SLUG_MPI
@@ -217,40 +220,141 @@ namespace utils
     }
 
     /**
-     * @brief Reconcile a per-rank boolean flag to true if any rank's own is true
-     * @param local This rank's own value of the flag
-     * @return local, unchanged, when SLUG_MPI is not defined or
-     *   mpiSize() == 1; otherwise true if any rank passed true, false
-     *   only if every rank passed false
-     * @details
-     * A signal like SIGTERM is caught independently, per-process (see
-     * utils::sigtermWasReceived()) -- under MPI, only the rank(s) an
-     * external SIGTERM was actually sent to (in principle, an entire
-     * job's process group, but not guaranteed, and not even guaranteed
-     * to be observed at the same moment by every rank that did receive
-     * it) would ever see it, and every rank still needs to reach the
-     * exact same decision at the exact same point for
-     * OutputManagerH5::checkpoint()/its own destructor's barrier-
-     * synchronized calls to stay in lockstep across ranks: a rank
-     * stopping alone, while others continue on to their own next
-     * mpiBarrier() call, would otherwise deadlock those other ranks
-     * forever, since nothing they call is left to make that barrier's
-     * matching call on the now-stopped rank's behalf. This is a single
-     * cheap collective (one MPI_Allreduce), called at the same,
-     * infrequent points sigtermWasReceived() itself already was
-     * (once per batch, not per trial), so its own cost is negligible
-     * next to those already-existing per-batch/per-checkpoint
-     * collectives.
+     * @struct BatchStop
+     * @brief Whether any rank wants a run to stop at the end of the current batch, and why
      */
-    [[nodiscard]] inline auto mpiAllReceivedSigterm(const bool local) -> bool
+    struct BatchStop
+    {
+        bool sigterm_ = false; /**< True if any rank caught a SIGTERM during the batch */
+        bool error_ = false;   /**< True if any rank had a trial throw during the batch */
+    };
+
+    /**
+     * @brief Reconcile every rank's own end-of-batch stop conditions into one run-wide decision
+     * @param localSigterm Whether this rank caught a SIGTERM during the batch
+     * @param localError Whether a trial on this rank threw during the batch
+     * @return {localSigterm, localError}, unchanged, when SLUG_MPI is
+     *   not defined or mpiSize() == 1; otherwise each field is true if
+     *   any rank passed true for it, and false only if every rank
+     *   passed false
+     * @details
+     * Every rank must reach the same decision at the same point, so
+     * that OutputManagerH5::checkpoint() and its destructor make their
+     * barrier-synchronized calls in lockstep across ranks. A rank that
+     * stops alone, while the others continue to their next collective
+     * call, deadlocks those others forever, since nothing is left to
+     * make the matching call on the stopped rank's behalf.
+     *
+     * Both conditions can arise on some ranks but not others. A signal
+     * like SIGTERM is caught independently per process (see
+     * utils::sigtermWasReceived()), and need not reach every rank, or
+     * reach them at the same moment. A trial that throws does so only
+     * on the rank running it. This is a single cheap collective (one
+     * MPI_Allreduce), called once per batch rather than per trial, so
+     * its cost is negligible next to the per-checkpoint collectives
+     * that already exist.
+     */
+    [[nodiscard]] inline auto mpiAgreeBatchStop(const bool localSigterm, const bool localError) -> BatchStop
     {
 #ifdef SLUG_MPI
-        int localFlag = local ? 1 : 0;
-        int anyFlag = 0;
-        MPI_Allreduce(&localFlag, &anyFlag, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
-        return anyFlag != 0;
+        std::array<int, 2> localFlags = { localSigterm ? 1 : 0, localError ? 1 : 0 };
+        std::array<int, 2> anyFlags = { 0, 0 };
+        MPI_Allreduce(localFlags.data(), anyFlags.data(), 2, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        return { .sigterm_ = anyFlags[0] != 0, .error_ = anyFlags[1] != 0 };
 #else
-        return local;
+        return { .sigterm_ = localSigterm, .error_ = localError };
+#endif
+    }
+
+    namespace detail
+    {
+        /**
+         * @brief Storage for whether every rank has agreed to stop on an error
+         * @return A reference to a function-local static, false until
+         *   rethrowAgreedError() sets it
+         */
+        inline auto errorAgreedFlag() -> bool&
+        {
+            static bool agreed = false;
+            return agreed;
+        }
+    } // namespace detail
+
+    /**
+     * @brief Return whether the exception currently ending the run is one every rank agreed on
+     * @return True once rethrowAgreedError() has been called, false before
+     * @details
+     * An agreed error (see rethrowAgreedError()) is being thrown from the
+     * same point on every rank, so every rank's shutdown -- in
+     * particular OutputManagerH5's destructor, and its collective calls
+     * -- proceeds in lockstep, exactly as for a normal completion. Any
+     * other exception is local to the rank that threw it; see
+     * unwindingFromLocalError() and mpiAbortIfMultiRank().
+     */
+    [[nodiscard]] inline auto errorIsAgreed() -> bool { return detail::errorAgreedFlag(); }
+
+    /**
+     * @brief Throw the error every rank agreed to stop on, from every rank
+     * @param localError The first exception a trial on this rank threw
+     *   during the batch, or a null exception_ptr if none did
+     * @throws The exception localError holds if it is non-null;
+     *   otherwise a std::runtime_error saying a trial failed on another
+     *   rank
+     * @details
+     * Call this, on every rank, once mpiAgreeBatchStop() has reported
+     * that some rank had a trial error. It first marks the error as
+     * agreed (see errorIsAgreed()), so the shutdown that follows runs
+     * its collective calls normally. A rank whose own trials all
+     * succeeded throws a generic error instead, since only the failing
+     * rank has the original exception; that rank prints the failure
+     * itself.
+     */
+    [[noreturn]] inline void rethrowAgreedError(const std::exception_ptr& localError)
+    {
+        detail::errorAgreedFlag() = true;
+        if (localError) { std::rethrow_exception(localError); }
+        throw std::runtime_error("stopping because a trial failed on another MPI rank "
+            "(see that rank's own error message)");
+    }
+
+    /**
+     * @brief Return whether this rank is unwinding from an exception the other ranks do not know about
+     * @return True if this is a multi-rank MPI run, an exception is
+     *   currently propagating (std::uncaught_exceptions() > 0), and
+     *   that exception is not an agreed one (see errorIsAgreed());
+     *   always false outside MPI, or with a single rank
+     * @details
+     * Intended for destructors that would otherwise make collective
+     * MPI calls (e.g. OutputManagerH5's). When this returns true, the
+     * other ranks are not unwinding along with this one: they are
+     * carrying on with the run, or are already waiting in some other
+     * collective. A collective call here would not match theirs, so
+     * it would never complete, and the error would never reach main()
+     * to be reported. Such a destructor should instead do only
+     * rank-local cleanup, and leave main() to report the error and
+     * call mpiAbortIfMultiRank().
+     */
+    [[nodiscard]] inline auto unwindingFromLocalError() -> bool
+    {
+        return mpiSize() > 1 && std::uncaught_exceptions() > 0 && !errorIsAgreed();
+    }
+
+    /**
+     * @brief Abort every MPI rank, if this is a multi-rank MPI run
+     * @param exitCode Error code to pass to MPI_Abort()
+     * @details
+     * A no-op when SLUG_MPI is not defined or mpiSize() == 1, leaving
+     * the caller to exit normally. Otherwise calls MPI_Abort(), which
+     * does not return: it terminates every rank in MPI_COMM_WORLD.
+     * This is the backstop for an error the other ranks did not agree
+     * on (see errorIsAgreed()): they may be blocked in a collective
+     * call this rank will never make, and MPI_Finalize() would then
+     * block forever as well.
+     */
+    inline void mpiAbortIfMultiRank([[maybe_unused]] const int exitCode)
+    {
+#ifdef SLUG_MPI
+        if (mpiSize() > 1) { MPI_Abort(MPI_COMM_WORLD, exitCode); }
 #endif
     }
 
