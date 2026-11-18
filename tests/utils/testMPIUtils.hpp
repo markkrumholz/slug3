@@ -69,15 +69,42 @@ inline auto testMPIUtilsSingleProcess() -> int
 }
 
 /**
+ * @class ScopedAgreedErrorFlag
+ * @brief Clears the process-wide agreed-error flag for the life of the object, then restores it
+ * @details
+ * rethrowAgreedError() sets a flag nothing else ever resets, so a test
+ * of it would otherwise leave errorIsAgreed() true for every test that
+ * runs after it in the same process, and fail if run twice.
+ */
+class ScopedAgreedErrorFlag
+{
+public:
+    ScopedAgreedErrorFlag() : saved_(utils::detail::errorAgreedFlag())
+    {
+        utils::detail::errorAgreedFlag() = false;
+    }
+    ScopedAgreedErrorFlag(const ScopedAgreedErrorFlag&) = delete;
+    ScopedAgreedErrorFlag(ScopedAgreedErrorFlag&&) = delete;
+    auto operator=(const ScopedAgreedErrorFlag&) -> ScopedAgreedErrorFlag& = delete;
+    auto operator=(ScopedAgreedErrorFlag&&) -> ScopedAgreedErrorFlag& = delete;
+    ~ScopedAgreedErrorFlag() { utils::detail::errorAgreedFlag() = saved_; }
+
+private:
+    bool saved_; /**< The flag's value before construction */
+};
+
+/**
  * @brief Test rethrowAgreedError(), errorIsAgreed(), and unwindingFromLocalError() in a single process
  * @returns 0 on success, 1 on failure
  * @details
- * rethrowAgreedError() sets process-wide state that is never reset,
- * so this must run after every other test that depends on
- * errorIsAgreed() being false.
+ * Clears the process-wide agreed-error flag on entry and restores it
+ * on every exit (see ScopedAgreedErrorFlag), so this can run in any
+ * order, any number of times.
  */
 inline auto testMPIUtilsAgreedError() -> int
 {
+    const ScopedAgreedErrorFlag flagGuard;
+
     // With a single rank there are no other ranks to disagree with,
     // so even an exception in flight is never a "local" one
     try

@@ -1627,27 +1627,50 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
 // critical section
 void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
 {
+    // Every handle is reset to -1 (the "not open" sentinel -- see
+    // openOutputFile()) once closed, and a file already closed is
+    // skipped entirely, so a second call is harmless. That happens if
+    // checkpoint() closes this thread's file and then fails (e.g. in
+    // syncCheckpoints()) before opening the next: the destructor then
+    // closes again, and writing attributes to a closed file would
+    // throw. Any exception from the attribute writes is held until
+    // after the critical section, since an exception must not leave an
+    // OpenMP critical construct, and the file is closed regardless.
+    std::exception_ptr error;
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
         // NOLINTBEGIN(misc-include-cleaner)
-        if (clustersGroup_() >= 0) { H5Gclose(clustersGroup_()); }
-        if (clusterSpectraGroup_() >= 0) { H5Gclose(clusterSpectraGroup_()); }
-        if (clusterPhotGroup_() >= 0) { H5Gclose(clusterPhotGroup_()); }
-        if (clusterYieldsGroup_() >= 0) { H5Gclose(clusterYieldsGroup_()); }
-        if (galaxyGroup_() >= 0) { H5Gclose(galaxyGroup_()); }
-        if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
-        if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
-        if (galaxyYieldsGroup_() >= 0) { H5Gclose(galaxyYieldsGroup_()); }
-        if (clusterFeedbackGroup_() >= 0) { H5Gclose(clusterFeedbackGroup_()); }
-        if (galaxyFeedbackGroup_() >= 0) { H5Gclose(galaxyFeedbackGroup_()); }
-        utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
-        utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
-        utils::writeULongAttr(file_(), "max_trial", maxTrial_);
-        H5Fclose(file_());
+        if (file_() >= 0)
+        {
+            for (auto* const group : { &clustersGroup_, &clusterSpectraGroup_,
+                    &clusterPhotGroup_, &clusterYieldsGroup_, &galaxyGroup_,
+                    &galaxySpectraGroup_, &galaxyPhotGroup_, &galaxyYieldsGroup_,
+                    &clusterFeedbackGroup_, &galaxyFeedbackGroup_ })
+            {
+                if ((*group)() >= 0)
+                {
+                    H5Gclose((*group)());
+                    (*group)() = -1;
+                }
+            }
+            try
+            {
+                utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
+                utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
+                utils::writeULongAttr(file_(), "max_trial", maxTrial_);
+            }
+            catch (...)
+            {
+                error = std::current_exception();
+            }
+            H5Fclose(file_());
+            file_() = -1;
+        }
         // NOLINTEND(misc-include-cleaner)
     }
+    if (error) { std::rethrow_exception(error); }
 }
 
 // See this class's own header comment for the full design
@@ -1721,8 +1744,16 @@ void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long t
                             "OutputManagerH5::syncCheckpoints: unable to reopen " +
                             path.string() + " for updating");
                     }
-                    utils::overwriteULongAttr(file, "trials_completed", globalTrialsCompleted);
-                    utils::overwriteULongAttr(file, "max_trial", globalMaxTrial);
+                    try
+                    {
+                        utils::overwriteULongAttr(file, "trials_completed", globalTrialsCompleted);
+                        utils::overwriteULongAttr(file, "max_trial", globalMaxTrial);
+                    }
+                    catch (...)
+                    {
+                        H5Fclose(file);
+                        throw;
+                    }
                     H5Fclose(file);
                 }
             }

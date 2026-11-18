@@ -40,7 +40,6 @@ auto main() -> int {
         result += testSplitSearchPath();
         result += testGetFilePathDataPath();
         result += testGetEnvULong();
-        // Must run last: sets process-wide state (see its own comment)
         result += testMPIUtilsAgreedError();
         return result;
     }

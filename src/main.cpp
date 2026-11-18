@@ -186,6 +186,10 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     {
         std::cerr << "Failed to parse input file "
             << args.back() << ": " << e.what() << '\n';
+        // See the catch block below: under MPI, the other ranks may
+        // have parsed the deck and gone on to a collective call this
+        // rank will never make
+        utils::mpiAbortIfMultiRank(1);
         return 1;
     }
 
