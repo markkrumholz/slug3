@@ -178,7 +178,7 @@ auto core::SimCluster::runBatch(const unsigned long rankBatchStart, const unsign
         {
 #pragma omp critical
             {
-                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
                 if (!firstError) { firstError = std::current_exception(); }
             }
         }
@@ -192,7 +192,7 @@ auto core::SimCluster::runBatch(const unsigned long rankBatchStart, const unsign
         }
         catch (const std::exception& error)
         {
-            std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+            std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
             firstError = std::current_exception();
             break;
         }

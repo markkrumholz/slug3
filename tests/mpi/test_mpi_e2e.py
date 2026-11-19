@@ -16,6 +16,7 @@ else, the skipif below makes it a no-op.
 """
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -382,7 +383,8 @@ def test_mpi_finalize_error_fails_every_rank(tmp_path, fail_rank):
 
     assert (f"injected test failure (SLUG_TEST_FAIL_FINALIZE_RANK = {fail_rank})"
             in result.stderr), result.stderr
-    assert result.stderr.count("slug: simulation failed on MPI rank") == nranks, result.stderr
+    reported = {int(r) for r in re.findall(r"slug: simulation failed on MPI rank (\d+):", result.stderr)}
+    assert reported == set(range(nranks)), result.stderr
     assert "MPI_ABORT" not in result.stdout + result.stderr, result.stdout + result.stderr
 
     trials = []

@@ -114,7 +114,7 @@ auto core::SimGalaxy::runBatch(const unsigned long rankBatchStart, const unsigne
         {
 #pragma omp critical
             {
-                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
                 if (!firstError) { firstError = std::current_exception(); }
             }
         }
@@ -128,7 +128,7 @@ auto core::SimGalaxy::runBatch(const unsigned long rankBatchStart, const unsigne
         }
         catch (const std::exception& error)
         {
-            std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+            std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
             firstError = std::current_exception();
             break;
         }
