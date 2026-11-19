@@ -114,7 +114,7 @@ auto core::SimGalaxy::runBatch(const unsigned long rankBatchStart, const unsigne
         {
 #pragma omp critical
             {
-                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
                 if (!firstError) { firstError = std::current_exception(); }
             }
         }
@@ -128,7 +128,7 @@ auto core::SimGalaxy::runBatch(const unsigned long rankBatchStart, const unsigne
         }
         catch (const std::exception& error)
         {
-            std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+            std::cerr << ("slug: trial " + std::to_string(trialNum) + " failed: " + error.what() + "\n"); // one write: see main()'s own "simulation failed" message
             firstError = std::current_exception();
             break;
         }
@@ -213,6 +213,7 @@ auto core::SimGalaxy::run() -> int
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
+            outputManager_->finalize();
             if (simControls_.verbosity() > 0)
             {
                 printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
@@ -240,6 +241,9 @@ auto core::SimGalaxy::run() -> int
     // See SimCluster::run()'s own identical comment
     outputManager_->notifyEarlyTermination(
         priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
+
+    // See SimCluster::run()'s own identical comment
+    outputManager_->finalize();
 
     // I/O rank only, like the starting summary above: by here every
     // rank has passed notifyEarlyTermination()'s own synchronization,

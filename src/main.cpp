@@ -22,6 +22,7 @@
 #include <optional>
 #include <ostream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <toml.hpp>
 #include <utility>
@@ -259,9 +260,13 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     }
     catch (const std::exception& e)
     {
-        std::cerr << "slug: simulation failed";
-        if (utils::mpiSize() > 1) { std::cerr << " on MPI rank " << utils::mpiRank(); }
-        std::cerr << ": " << e.what() << '\n';
+        // Composed first and written in one piece: under MPI every rank
+        // may print this at once to the same unbuffered stream, and
+        // separate writes from different ranks interleave mid-line
+        std::string message = "slug: simulation failed";
+        if (utils::mpiSize() > 1) { message += " on MPI rank " + std::to_string(utils::mpiRank()); }
+        message += ": " + std::string(e.what()) + "\n";
+        std::cerr << message << std::flush;
 
         // Under MPI, an error every rank agreed to stop on (see
         // utils::rethrowAgreedError()) reaches here on every rank at

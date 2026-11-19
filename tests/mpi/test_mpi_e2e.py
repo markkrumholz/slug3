@@ -16,6 +16,7 @@ else, the skipif below makes it a no-op.
 """
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -357,3 +358,37 @@ def test_mpi_unagreed_error_aborts_every_rank(tmp_path, fail_rank):
 
     assert (f"slug: simulation failed on MPI rank {fail_rank}: injected test failure"
             in result.stderr), result.stderr
+
+
+@pytest.mark.parametrize("fail_rank", [0, 1])
+def test_mpi_finalize_error_fails_every_rank(tmp_path, fail_rank):
+    """
+    A failure while finishing the output, after every trial has run
+    (injected via SLUG_TEST_FAIL_FINALIZE_RANK on one rank, after that
+    rank's own close/sync/consolidation succeeded), must make every
+    rank exit nonzero, with the error reported, rather than being
+    logged and ignored the way OutputManagerH5's destructor alone can
+    only do. Every rank agrees on the failure (see
+    OutputManagerH5::finalize()), so the shutdown is a clean one, not
+    an MPI_Abort, and the consolidated output is all still written.
+    """
+    nranks = 4
+    deck = tmp_path / "finalize_error.in"
+    deck.write_text(DECK_TEMPLATE.format(
+        n_trial=20, model_name="mpi_finalize_error", out_dir=tmp_path,
+        output_mode="h5", checkpoint_interval=10,
+    ))
+    result = run_slug_expecting_failure(
+        deck, nranks=nranks, extra_env={"SLUG_TEST_FAIL_FINALIZE_RANK": str(fail_rank)})
+
+    assert (f"injected test failure (SLUG_TEST_FAIL_FINALIZE_RANK = {fail_rank})"
+            in result.stderr), result.stderr
+    reported = {int(r) for r in re.findall(r"slug: simulation failed on MPI rank (\d+):", result.stderr)}
+    assert reported == set(range(nranks)), result.stderr
+    assert "MPI_ABORT" not in result.stdout + result.stderr, result.stdout + result.stderr
+
+    trials = []
+    for h5_path in sorted(tmp_path.glob("mpi_finalize_error_chk*.h5")):
+        _, chk_trials = read_uids_and_trials(h5_path)
+        trials.extend(chk_trials)
+    assert sorted(trials) == list(range(20))

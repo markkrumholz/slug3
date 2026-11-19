@@ -266,6 +266,28 @@ namespace utils
 #endif
     }
 
+    /**
+     * @brief Return whether a flag is true on any MPI rank
+     * @param local This rank's own value of the flag
+     * @return local, unchanged, when SLUG_MPI is not defined or
+     *   mpiSize() == 1; otherwise true if any rank passed true
+     * @details
+     * A collective call (one MPI_Allreduce): every rank must call it at
+     * the same point. See mpiAgreeBatchStop() for the two-flag form
+     * used at the end of each batch of trials.
+     */
+    [[nodiscard]] inline auto mpiAnyRank(const bool local) -> bool
+    {
+#ifdef SLUG_MPI
+        const int localFlag = local ? 1 : 0;
+        int anyFlag = 0;
+        MPI_Allreduce(&localFlag, &anyFlag, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        return anyFlag != 0;
+#else
+        return local;
+#endif
+    }
+
     namespace detail
     {
         /**
@@ -295,26 +317,29 @@ namespace utils
 
     /**
      * @brief Throw the error every rank agreed to stop on, from every rank
-     * @param localError The first exception a trial on this rank threw
-     *   during the batch, or a null exception_ptr if none did
+     * @param localError The first exception this rank hit, or a null
+     *   exception_ptr if it hit none
+     * @param elsewhere The message a rank with no error of its own
+     *   throws; defaults to saying a trial failed on another rank
      * @throws The exception localError holds if it is non-null;
-     *   otherwise a std::runtime_error saying a trial failed on another
-     *   rank
+     *   otherwise a std::runtime_error with message elsewhere
      * @details
-     * Call this, on every rank, once mpiAgreeBatchStop() has reported
-     * that some rank had a trial error. It first marks the error as
-     * agreed (see errorIsAgreed()), so the shutdown that follows runs
-     * its collective calls normally. A rank whose own trials all
-     * succeeded throws a generic error instead, since only the failing
+     * Call this, on every rank, once a collective agreement
+     * (mpiAgreeBatchStop() after a batch of trials, or mpiAnyRank())
+     * has reported that some rank had an error. It first marks the
+     * error as agreed (see errorIsAgreed()), so the shutdown that
+     * follows runs its collective calls normally. A rank with no error
+     * of its own throws a generic one instead, since only the failing
      * rank has the original exception; that rank prints the failure
      * itself.
      */
-    [[noreturn]] inline void rethrowAgreedError(const std::exception_ptr& localError)
+    [[noreturn]] inline void rethrowAgreedError(const std::exception_ptr& localError,
+        const char* elsewhere = "stopping because a trial failed on another MPI rank "
+            "(see that rank's own error message)")
     {
         detail::errorAgreedFlag() = true;
         if (localError) { std::rethrow_exception(localError); }
-        throw std::runtime_error("stopping because a trial failed on another MPI rank "
-            "(see that rank's own error message)");
+        throw std::runtime_error(elsewhere);
     }
 
     /**

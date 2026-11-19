@@ -12,6 +12,7 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- most symbols from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) are used only inside "#ifdef SLUG_MPI" blocks, which a build not compiled with SLUG_MPI (every target except slug) elides, so the check can misjudge which of them this file uses in that configuration
+#include "../utils/MiscUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -454,7 +455,8 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
 // happens below.
 io::OutputManagerH5::OutputManagerH5(
     const SimControls& simControls, const bool restart) :
-    OutputManager(simControls)
+    OutputManager(simControls),
+    testFailFinalizeRank_(utils::getEnvULong("SLUG_TEST_FAIL_FINALIZE_RANK"))
 {
     // See this constructor's own header comment for why this is
     // unreachable from the CLI in practice, but still worth guarding
@@ -1548,8 +1550,65 @@ void io::OutputManagerH5::openGalaxyFeedbackGroup()
 // consolidates (see its own comment), so every earlier checkpoint's
 // own thread_NNNN.h5 files are still sitting there, unmerged, until
 // this runs.
-io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- every throwing call below (closeOutputFile(), syncCheckpoints(), consolidateFiles()) is inside its own try/catch, catching std::exception by reference; verified at runtime (real MPI + non-MPI runs alike, including ones that hit closeOutputFile()'s own genuine HDF5 failure paths) that a throw here is caught cleanly rather than escaping. This check's own known limitation (see main.cpp's own identical NOLINT) is that it cannot see through calls into other translation units -- utils::appendFileContents()/utils::overwriteULongAttr(), both defined in HDF5Utils.cpp -- well enough to confirm every type they could throw derives from std::exception, so it stays conservative regardless of the try/catch actually present.
+io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- shutDown() catches every exception from the calls it makes (closeOutputFile(), syncCheckpoints(), consolidateFiles()) by std::exception reference and returns it rather than throwing; this check cannot see through calls into other translation units (utils::appendFileContents()/utils::overwriteULongAttr(), in HDF5Utils.cpp) well enough to confirm every type they could throw derives from std::exception, so it stays conservative regardless
 {
+    // Normally finalize() has already done this, and reported any
+    // failure; this is the fallback for a run ending on an error, or a
+    // caller that never calls finalize(). A destructor cannot throw, so
+    // any failure here is only logged (by shutDown() itself).
+    if (finalized_) { return; }
+    try
+    {
+        static_cast<void>(shutDown());
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "slug: OutputManagerH5: error finishing output: " << error.what() << "\n";
+    }
+    catch (...)
+    {
+        std::cerr << "slug: OutputManagerH5: unknown error finishing output\n";
+    }
+}
+
+// See this method's own header comment
+void io::OutputManagerH5::finalize()
+{
+    if (finalized_) { return; }
+    // shutDown() records every failure it expects, but anything that
+    // still escapes it must not skip the agreement below on this rank
+    // alone, which would leave the others waiting in it
+    std::exception_ptr error;
+    try
+    {
+        error = shutDown();
+    }
+    catch (...)
+    {
+        error = std::current_exception();
+    }
+    if (!error && testFailFinalizeRank_ == static_cast<unsigned long>(utils::mpiRank()))
+    {
+        error = std::make_exception_ptr(std::runtime_error(
+            "injected test failure (SLUG_TEST_FAIL_FINALIZE_RANK = " +
+            std::to_string(utils::mpiRank()) + ")"));
+    }
+    if (utils::mpiAnyRank(error != nullptr))
+    {
+        utils::rethrowAgreedError(error, "stopping because finishing the output "
+            "failed on another MPI rank (see that rank's own error message)");
+    }
+}
+
+// See this method's own header comment
+auto io::OutputManagerH5::shutDown() -> std::exception_ptr // NOLINT(readability-function-cognitive-complexity) -- close, sync, and consolidate in sequence, each with its own error handling; it was the destructor's body, unchanged apart from recording the first error, and splitting it further would only add indirection
+{
+    finalized_ = true;
+    std::exception_ptr firstError;
+    const auto record = [&firstError]() -> void
+    {
+        if (!firstError) { firstError = std::current_exception(); }
+    };
     // Ordinarily, being destroyed at all means every trial in the run
     // must already be complete, so simControls_.nTrial() is the right
     // trials_completed to close out with -- there is no partial-run
@@ -1559,13 +1618,11 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
     // comments) and called notifyEarlyTermination() before returning:
     // earlyTerminationTrialsCompleted_ then holds the true count
     // instead, which value_or() prefers here.
-    // Neither closeOutputFile() nor consolidateFiles() may be allowed
-    // to throw out of a destructor (undefined behavior at best, a
-    // std::terminate() at worst if this fires during stack unwinding
-    // from some other exception already in flight) -- both are caught
-    // here and reported to stderr instead, on a strictly best-effort
-    // basis: there is no caller left to hand a thrown exception to by
-    // the time a destructor is running.
+    // Every step's failure is caught, logged, and recorded here, and
+    // the remaining steps still attempted: this runs from the
+    // destructor too, which must not throw (undefined behavior at best,
+    // std::terminate() at worst during unwinding from some other
+    // exception), and finalize() reports the first failure afterwards.
     const auto trialsCompleted =
         earlyTerminationTrialsCompleted_.value_or(simControls_.nTrial());
 #ifdef _OPENMP
@@ -1581,8 +1638,11 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
 #ifdef _OPENMP
 #pragma omp critical
 #endif
-            std::cerr << "slug: OutputManagerH5: error closing output file: "
-                << error.what() << "\n";
+            {
+                std::cerr << "slug: OutputManagerH5: error closing output file: "
+                    << error.what() << "\n";
+                record();
+            }
         }
     }
 
@@ -1601,7 +1661,7 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
         std::cerr << "slug: OutputManagerH5: rank " << utils::mpiRank() <<
             " is stopping on an error the other MPI ranks have not seen; "
             "skipping the final checkpoint sync and consolidation\n";
-        return;
+        return firstError;
     }
 
     // See syncCheckpoints()'s own header comment: this is the final
@@ -1615,6 +1675,7 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
     {
         std::cerr << "slug: OutputManagerH5: error syncing final checkpoint: "
             << error.what() << "\n";
+        record();
     }
 
 #if defined(_OPENMP) || defined(SLUG_MPI)
@@ -1654,15 +1715,16 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
                 // directory consolidateFiles() expects, so this only
                 // ever skips checkpoints that a previous run's own
                 // destructor has already fully consolidated.
-                if (!std::filesystem::is_directory(chkPath)) { continue; }
                 try
                 {
+                    if (!std::filesystem::is_directory(chkPath)) { continue; }
                     consolidateFiles(chkPath);
                 }
                 catch (const std::exception& error)
                 {
                     std::cerr << "slug: OutputManagerH5: error consolidating " <<
                         chkPath.string() << ": " << error.what() << "\n";
+                    record();
                 }
             }
         }
@@ -1677,10 +1739,12 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
             {
                 std::cerr << "slug: OutputManagerH5: error consolidating output: "
                     << error.what() << "\n";
+                record();
             }
         }
     }
 #endif
+    return firstError;
 }
 
 // Close whichever of this thread's own groups are open, then its
@@ -1726,7 +1790,12 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
             {
                 error = std::current_exception();
             }
-            H5Fclose(file_());
+            // Closing flushes the file's data, so it can fail too
+            if (H5Fclose(file_()) < 0 && !error)
+            {
+                error = std::make_exception_ptr(std::runtime_error(
+                    "OutputManagerH5: unable to close an output file (flushing its data failed)"));
+            }
             file_() = -1;
         }
         // NOLINTEND(misc-include-cleaner)
@@ -1837,6 +1906,57 @@ void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long t
 #endif
 }
 
+// Append every file in threadFiles but the first (which destPath
+// already is a copy of) to destPath, then close it, throwing if any
+// step fails -- including the final close, which flushes destPath's
+// data. Every file this opens is closed again on every path. Factored
+// out of consolidateFiles() to keep its cognitive complexity down.
+static void appendIntoConsolidated(const std::string& destPath,
+    const std::vector<std::filesystem::path>& threadFiles)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t destFile = H5Fopen(destPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+    if (destFile < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::consolidateFiles: unable to open " + destPath + " for updating");
+    }
+    try
+    {
+        for (std::size_t i = 1; i < threadFiles.size(); ++i)
+        {
+            const hid_t srcFile = H5Fopen(threadFiles.at(i).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (srcFile < 0)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::consolidateFiles: unable to open " + threadFiles.at(i).string());
+            }
+            try
+            {
+                utils::appendFileContents(srcFile, destFile);
+            }
+            catch (...)
+            {
+                H5Fclose(srcFile);
+                throw;
+            }
+            H5Fclose(srcFile);
+        }
+    }
+    catch (...)
+    {
+        H5Fclose(destFile);
+        throw;
+    }
+    if (H5Fclose(destFile) < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::consolidateFiles: unable to close " + destPath +
+            " (flushing its data failed)");
+    }
+    // NOLINTEND(misc-include-cleaner)
+}
+
 // See this class's own header comment for the full merge algorithm
 void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
 {
@@ -1877,31 +1997,37 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
     // comment), not append order, matters for correctness here.
     std::ranges::sort(threadFiles);
 
+    // The consolidated file is built under a temporary name, and given
+    // its real one only once it is complete and closed, so a failure at
+    // any point -- including partway through the initial copy -- never
+    // leaves a partial modelName.h5 behind: a later restart would take
+    // that for a complete checkpoint (see restartSetup(), which prefers
+    // it to the directory). The temporary name does not end in .h5, so
+    // the restart scan ignores it, and is removed on failure. The
+    // per-thread files are removed only after the rename, so until then
+    // they remain the one complete copy of this output. A rename would
+    // silently replace an existing destination, which copy_file() used
+    // to refuse to do, so that is checked for explicitly.
     const auto destPath = path.string() + ".h5";
-    std::filesystem::copy_file(threadFiles.front(), destPath);
-
-    // NOLINTBEGIN(misc-include-cleaner)
-    const hid_t destFile = H5Fopen(destPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
-    if (destFile < 0)
+    const auto tmpPath = destPath + ".partial";
+    if (std::filesystem::exists(destPath))
     {
         throw std::runtime_error(
-            "OutputManagerH5::consolidateFiles: unable to open " + destPath + " for updating");
+            "OutputManagerH5::consolidateFiles: " + destPath + " already exists");
     }
-
-    for (std::size_t i = 1; i < threadFiles.size(); ++i)
+    try
     {
-        const hid_t srcFile = H5Fopen(threadFiles.at(i).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        if (srcFile < 0)
-        {
-            H5Fclose(destFile);
-            throw std::runtime_error(
-                "OutputManagerH5::consolidateFiles: unable to open " + threadFiles.at(i).string());
-        }
-        utils::appendFileContents(srcFile, destFile);
-        H5Fclose(srcFile);
+        std::filesystem::copy_file(threadFiles.front(), tmpPath,
+            std::filesystem::copy_options::overwrite_existing);
+        appendIntoConsolidated(tmpPath, threadFiles);
+        std::filesystem::rename(tmpPath, destPath);
     }
-    H5Fclose(destFile);
-    // NOLINTEND(misc-include-cleaner)
+    catch (...)
+    {
+        std::error_code ec;
+        std::filesystem::remove(tmpPath, ec);
+        throw;
+    }
 
     for (const auto& threadFile : threadFiles) { std::filesystem::remove(threadFile); }
     std::filesystem::remove(path);
