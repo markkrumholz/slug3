@@ -1556,14 +1556,37 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
     // failure; this is the fallback for a run ending on an error, or a
     // caller that never calls finalize(). A destructor cannot throw, so
     // any failure here is only logged (by shutDown() itself).
-    if (!finalized_) { static_cast<void>(shutDown()); }
+    if (finalized_) { return; }
+    try
+    {
+        static_cast<void>(shutDown());
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "slug: OutputManagerH5: error finishing output: " << error.what() << "\n";
+    }
+    catch (...)
+    {
+        std::cerr << "slug: OutputManagerH5: unknown error finishing output\n";
+    }
 }
 
 // See this method's own header comment
 void io::OutputManagerH5::finalize()
 {
     if (finalized_) { return; }
-    std::exception_ptr error = shutDown();
+    // shutDown() records every failure it expects, but anything that
+    // still escapes it must not skip the agreement below on this rank
+    // alone, which would leave the others waiting in it
+    std::exception_ptr error;
+    try
+    {
+        error = shutDown();
+    }
+    catch (...)
+    {
+        error = std::current_exception();
+    }
     if (!error && testFailFinalizeRank_ == static_cast<unsigned long>(utils::mpiRank()))
     {
         error = std::make_exception_ptr(std::runtime_error(
@@ -1692,9 +1715,9 @@ auto io::OutputManagerH5::shutDown() -> std::exception_ptr // NOLINT(readability
                 // directory consolidateFiles() expects, so this only
                 // ever skips checkpoints that a previous run's own
                 // destructor has already fully consolidated.
-                if (!std::filesystem::is_directory(chkPath)) { continue; }
                 try
                 {
+                    if (!std::filesystem::is_directory(chkPath)) { continue; }
                     consolidateFiles(chkPath);
                 }
                 catch (const std::exception& error)
@@ -1767,7 +1790,12 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
             {
                 error = std::current_exception();
             }
-            H5Fclose(file_());
+            // Closing flushes the file's data, so it can fail too
+            if (H5Fclose(file_()) < 0 && !error)
+            {
+                error = std::make_exception_ptr(std::runtime_error(
+                    "OutputManagerH5: unable to close an output file (flushing its data failed)"));
+            }
             file_() = -1;
         }
         // NOLINTEND(misc-include-cleaner)
@@ -1878,6 +1906,57 @@ void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long t
 #endif
 }
 
+// Append every file in threadFiles but the first (which destPath
+// already is a copy of) to destPath, then close it, throwing if any
+// step fails -- including the final close, which flushes destPath's
+// data. Every file this opens is closed again on every path. Factored
+// out of consolidateFiles() to keep its cognitive complexity down.
+static void appendIntoConsolidated(const std::string& destPath,
+    const std::vector<std::filesystem::path>& threadFiles)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t destFile = H5Fopen(destPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+    if (destFile < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::consolidateFiles: unable to open " + destPath + " for updating");
+    }
+    try
+    {
+        for (std::size_t i = 1; i < threadFiles.size(); ++i)
+        {
+            const hid_t srcFile = H5Fopen(threadFiles.at(i).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (srcFile < 0)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::consolidateFiles: unable to open " + threadFiles.at(i).string());
+            }
+            try
+            {
+                utils::appendFileContents(srcFile, destFile);
+            }
+            catch (...)
+            {
+                H5Fclose(srcFile);
+                throw;
+            }
+            H5Fclose(srcFile);
+        }
+    }
+    catch (...)
+    {
+        H5Fclose(destFile);
+        throw;
+    }
+    if (H5Fclose(destFile) < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::consolidateFiles: unable to close " + destPath +
+            " (flushing its data failed)");
+    }
+    // NOLINTEND(misc-include-cleaner)
+}
+
 // See this class's own header comment for the full merge algorithm
 void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
 {
@@ -1921,28 +2000,22 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
     const auto destPath = path.string() + ".h5";
     std::filesystem::copy_file(threadFiles.front(), destPath);
 
-    // NOLINTBEGIN(misc-include-cleaner)
-    const hid_t destFile = H5Fopen(destPath.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
-    if (destFile < 0)
+    // The per-thread files are removed only once the destination is
+    // complete and closed. If anything fails before then, the partial
+    // destination is removed instead, leaving the per-thread files as
+    // the one complete copy of this output -- a partial modelName.h5
+    // would otherwise be taken for a complete checkpoint by a later
+    // restart (see restartSetup()), which prefers it to the directory.
+    try
     {
-        throw std::runtime_error(
-            "OutputManagerH5::consolidateFiles: unable to open " + destPath + " for updating");
+        appendIntoConsolidated(destPath, threadFiles);
     }
-
-    for (std::size_t i = 1; i < threadFiles.size(); ++i)
+    catch (...)
     {
-        const hid_t srcFile = H5Fopen(threadFiles.at(i).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        if (srcFile < 0)
-        {
-            H5Fclose(destFile);
-            throw std::runtime_error(
-                "OutputManagerH5::consolidateFiles: unable to open " + threadFiles.at(i).string());
-        }
-        utils::appendFileContents(srcFile, destFile);
-        H5Fclose(srcFile);
+        std::error_code ec;
+        std::filesystem::remove(destPath, ec);
+        throw;
     }
-    H5Fclose(destFile);
-    // NOLINTEND(misc-include-cleaner)
 
     for (const auto& threadFile : threadFiles) { std::filesystem::remove(threadFile); }
     std::filesystem::remove(path);
