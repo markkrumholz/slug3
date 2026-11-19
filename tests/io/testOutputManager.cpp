@@ -32,6 +32,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <toml.hpp>
 #include <tuple>
 #include <utility>
@@ -4696,6 +4698,145 @@ static auto testFeedbackOrYieldsOnlyOutputAllowed() -> int
     return 0;
 }
 
+// Changes the current working directory for the lifetime of the
+// object, restoring the original on destruction -- every other test in
+// this binary resolves its asset paths relative to the repository root
+class ScopedCwd
+{
+public:
+    /**
+     * @brief Change the current working directory to dir
+     * @param dir The directory to change to
+     */
+    explicit ScopedCwd(const std::filesystem::path& dir) :
+        old_(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(dir);
+    }
+    ScopedCwd(const ScopedCwd&) = delete;
+    ScopedCwd(ScopedCwd&&) = delete;
+    auto operator=(const ScopedCwd&) -> ScopedCwd& = delete;
+    auto operator=(ScopedCwd&&) -> ScopedCwd& = delete;
+    ~ScopedCwd()
+    {
+        std::error_code ec;
+        std::filesystem::current_path(old_, ec);
+    }
+
+private:
+    std::filesystem::path old_; /**< Working directory to restore */
+};
+
+// Restarting with out_dir unset -- its default, meaning the current
+// working directory -- must resume from the last checkpoint there.
+// It used to find no checkpoint at all (std::filesystem::exists("") is
+// false), start over from trial 0, and then throw because the first
+// checkpoint it tried to write already existed. Also checks that a
+// restart with nothing to resume starts fresh rather than throwing, and
+// that if the restart's search and the writer still disagree (here, a
+// stray directory named like a checkpoint file, which the search
+// rightly ignores), the resulting "already exists" error says that
+// --restart found no checkpoint. SimControls is built from the
+// repository root, since the deck's asset paths are relative to it;
+// only the OutputManagerH5s run from the temporary directory.
+static auto testRestartWithDefaultOutDir() -> int
+{
+    const auto runDir = std::filesystem::temp_directory_path() / "slugTestRestartDefaultOutDir";
+    std::filesystem::remove_all(runDir);
+    std::filesystem::create_directories(runDir);
+    const std::string modelName = "test_restart_default_outdir";
+
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, runDir);
+    inputDeck.at_path("output").as_table()->erase("out_dir");
+    inputDeck.at_path("output").as_table()->insert("checkpoint_interval", int64_t{2});
+    inputDeck.insert_or_assign("n_trial", int64_t{6});
+
+    int result = 0;
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (!controls.outDir().empty())
+        {
+            std::cerr << "testOutputManager: restart default out_dir: expected an "
+                "empty outDir(), got " << controls.outDir() << "\n";
+            return 1;
+        }
+        const ScopedCwd cwd(runDir);
+
+        // A restart with no checkpoint anywhere starts from trial 0
+        {
+            io::OutputManagerH5 manager(controls, /* restart = */ true);
+            if (manager.restartTrialsDone() != 0)
+            {
+                std::cerr << "testOutputManager: restart default out_dir: a restart "
+                    "with no checkpoint should start from 0 trials done, got "
+                    << manager.restartTrialsDone() << "\n";
+                result += 1;
+            }
+        }
+        std::filesystem::remove_all(runDir / (modelName + "_chk00000"));
+        std::filesystem::remove(runDir / (modelName + "_chk00000.h5"));
+
+        // A first segment: checkpoint 0 after 2 trials, then stop after
+        // 4, leaving checkpoint 1 as the latest
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.checkpoint(2);
+            manager.notifyEarlyTermination(4);
+        }
+
+        // The restart must find checkpoint 1 in the working directory
+        {
+            io::OutputManagerH5 manager(controls, /* restart = */ true);
+            if (manager.restartTrialsDone() != 4)
+            {
+                std::cerr << "testOutputManager: restart default out_dir: expected "
+                    "to resume with 4 trials done, got " << manager.restartTrialsDone() << "\n";
+                result += 1;
+            }
+            manager.notifyEarlyTermination(6);
+        }
+        const auto chk2 = runDir / (modelName + "_chk00002");
+        if (!std::filesystem::exists(chk2.string() + ".h5") && !std::filesystem::exists(chk2))
+        {
+            std::cerr << "testOutputManager: restart default out_dir: the restarted "
+                "run did not write checkpoint 2\n";
+            result += 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testOutputManager: restart default out_dir: unexpected "
+            "exception: " << e.what() << "\n";
+        return result + 1;
+    }
+
+    // A stray directory named like checkpoint 0's file: the search
+    // skips it, but the writer finds checkpoint 0's path taken
+    const auto strayDir = std::filesystem::temp_directory_path() / "slugTestRestartStrayCheckpoint";
+    std::filesystem::remove_all(strayDir);
+    std::filesystem::create_directories(strayDir / (modelName + "_chk00000.h5"));
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const ScopedCwd cwd(strayDir);
+        const io::OutputManagerH5 manager(controls, /* restart = */ true);
+        std::cerr << "testOutputManager: restart default out_dir: expected the "
+            "stray checkpoint-named directory to make the restart throw\n";
+        result += 1;
+    }
+    catch (const std::runtime_error& e)
+    {
+        if (!std::string_view(e.what()).contains("--restart was requested, but found no usable checkpoint"))
+        {
+            std::cerr << "testOutputManager: restart default out_dir: the \"already "
+                "exists\" error does not mention the restart: " << e.what() << "\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
 auto testOutputManager() -> int
 {
     int result = 0;
@@ -4747,5 +4888,6 @@ auto testOutputManager() -> int
     result += testWriteClusterFeedbackAscii();
     result += testWriteGalaxyFeedbackAscii();
     result += testFeedbackOrYieldsOnlyOutputAllowed();
+    result += testRestartWithDefaultOutDir();
     return result;
 }
