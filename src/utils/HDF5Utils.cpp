@@ -274,9 +274,14 @@ void utils::writeULongAttr(const hid_t loc, const std::string& name,
         throw std::runtime_error(
             "utils::writeULongAttr: unable to create attribute " + name);
     }
-    H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
+    const herr_t status = H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
     H5Aclose(attr);
     H5Sclose(space);
+    if (status < 0)
+    {
+        throw std::runtime_error(
+            "utils::writeULongAttr: unable to write attribute " + name);
+    }
 }
 
 void utils::writeBoolAttr(const hid_t loc, const std::string& name, const bool value)
@@ -319,8 +324,13 @@ void utils::overwriteULongAttr(const hid_t loc, const std::string& name,
         throw std::runtime_error(
             "utils::overwriteULongAttr: unable to open attribute " + name);
     }
-    H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
+    const herr_t status = H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
     H5Aclose(attr);
+    if (status < 0)
+    {
+        throw std::runtime_error(
+            "utils::overwriteULongAttr: unable to write attribute " + name);
+    }
 }
 
 void utils::writeStringDataset(const hid_t loc, const std::string& name,

@@ -186,6 +186,10 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     {
         std::cerr << "Failed to parse input file "
             << args.back() << ": " << e.what() << '\n';
+        // See the catch block below: under MPI, the other ranks may
+        // have parsed the deck and gone on to a collective call this
+        // rank will never make
+        utils::mpiAbortIfMultiRank(1);
         return 1;
     }
 
@@ -255,7 +259,19 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     }
     catch (const std::exception& e)
     {
-        std::cerr << "slug: simulation failed: " << e.what() << '\n';
+        std::cerr << "slug: simulation failed";
+        if (utils::mpiSize() > 1) { std::cerr << " on MPI rank " << utils::mpiRank(); }
+        std::cerr << ": " << e.what() << '\n';
+
+        // Under MPI, an error every rank agreed to stop on (see
+        // utils::rethrowAgreedError()) reaches here on every rank at
+        // once, after a lockstep shutdown, so returning normally lets
+        // every rank call MPI_Finalize() together. Any other error is
+        // this rank's alone: the other ranks may be blocked in a
+        // collective call this rank will never make, so MPI_Finalize()
+        // would block forever too. Abort every rank instead (a no-op
+        // outside MPI, or with a single rank).
+        if (!utils::errorIsAgreed()) { utils::mpiAbortIfMultiRank(1); }
         return 1;
     }
 

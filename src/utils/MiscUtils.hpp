@@ -10,12 +10,17 @@
 #define MISCUTILS_HPP
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 namespace utils
 {
@@ -122,6 +127,34 @@ namespace utils
         }
 
         return std::filesystem::path();
+    }
+
+    /**
+     * @brief Read an environment variable as a non-negative integer
+     * @param name Name of the environment variable
+     * @return The variable's value, if it is set and non-empty;
+     *   std::nullopt if it is unset or empty
+     * @throws std::runtime_error if the variable is set to anything
+     *   other than a plain base-10 non-negative integer that fits in
+     *   an unsigned long
+     * @details
+     * Like getFilePath()'s own use of std::getenv, this is not
+     * thread-safe against a concurrent setenv(), so call it only
+     * during single-threaded setup.
+     */
+    inline auto getEnvULong(const char* name) -> std::optional<unsigned long>
+    {
+        const char* value = std::getenv(name); // NOLINT(concurrency-mt-unsafe) -- see getFilePath()'s own identical NOLINT
+        if (value == nullptr || *value == '\0') { return std::nullopt; }
+        const std::string_view text(value);
+        unsigned long result = 0;
+        const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), result); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- text.data() + text.size() is text's own end pointer
+        if (ec != std::errc() || ptr != text.data() + text.size()) // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- see above
+        {
+            throw std::runtime_error("environment variable " + std::string(name) +
+                " = \"" + std::string(text) + "\" is not a non-negative integer");
+        }
+        return result;
     }
 
     /**

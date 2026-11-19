@@ -10,6 +10,7 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "../utils/MPIUtils.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
@@ -69,7 +70,9 @@ core::SimCluster::SimCluster(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
     simControls_(simControls),
     outputManager_(std::move(outputManager)),
-    restart_(restart)
+    restart_(restart),
+    testFailTrial_(utils::getEnvULong("SLUG_TEST_FAIL_TRIAL")),
+    testFailRank_(utils::getEnvULong("SLUG_TEST_FAIL_RANK"))
 {
 }
 
@@ -89,6 +92,13 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     // trialsCompleted_ as if it meant "trials [0, trialsCompleted_)
     // are done" -- see run()'s own comment for why.
     if (utils::sigtermWasReceived()) { return; }
+
+    // Test-only fault injection; see testFailTrial_'s own comment
+    if (testFailTrial_ == trialNum)
+    {
+        throw std::runtime_error("injected test failure (SLUG_TEST_FAIL_TRIAL = " +
+            std::to_string(trialNum) + ")");
+    }
 
     if (simControls_.verbosity() > 1)
     {
@@ -139,6 +149,56 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     }
 
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
+}
+
+// See this method's own header comment
+auto core::SimCluster::runBatch(const unsigned long rankBatchStart, const unsigned long rankBatchEnd)
+    -> std::exception_ptr
+{
+    // See runTrial()'s own comment for why each trial is
+    // individually wrapped in a try/catch here, rather than letting
+    // an exception propagate out of the "#pragma omp parallel for"
+    // loop body directly: every trial in this batch still runs (so
+    // one bad trial does not lose every other thread's own in-flight
+    // work), and the first exception caught is returned once the
+    // whole batch's own parallel region has finished. Without
+    // OpenMP, the first exception instead ends this rank's batch
+    // immediately. Either way it is returned rather than rethrown
+    // here: see run()'s own comment on mpiAgreeBatchStop() for why.
+    std::exception_ptr firstError;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+    for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+    {
+        try
+        {
+            runTrial(trialNum);
+        }
+        catch (const std::exception& error)
+        {
+#pragma omp critical
+            {
+                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                if (!firstError) { firstError = std::current_exception(); }
+            }
+        }
+    }
+#else
+    for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+    {
+        try
+        {
+            runTrial(trialNum);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+            firstError = std::current_exception();
+            break;
+        }
+    }
+#endif
+    return firstError;
 }
 
 auto core::SimCluster::run() -> int
@@ -247,79 +307,41 @@ auto core::SimCluster::run() -> int
         // (rankBatchStart, rankBatchEnd) == (batchStart, batchEnd) when
         // this build was not compiled with SLUG_MPI, or is running as a
         // single rank.
-        //
-        // Unpacked into plain variables rather than a structured
-        // binding: rankBatchStart/rankBatchEnd are used inside the
-        // "#pragma omp parallel for" below, and Clang (as of 22) does
-        // not support capturing a structured binding in an OpenMP
-        // region, so a structured binding here fails to compile under
-        // Clang with OpenMP enabled.
-        const auto rankBatch = utils::mpiPartitionRange(batchStart, batchEnd);
-        const unsigned long rankBatchStart = rankBatch.first;
-        const unsigned long rankBatchEnd = rankBatch.second;
+        const auto [rankBatchStart, rankBatchEnd] = utils::mpiPartitionRange(batchStart, batchEnd);
+        const std::exception_ptr firstError = runBatch(rankBatchStart, rankBatchEnd);
 
-#ifdef _OPENMP
-        // See runTrial()'s own comment for why each trial is
-        // individually wrapped in a try/catch here, rather than
-        // letting an exception propagate out of the "#pragma omp
-        // parallel for" loop body directly: every trial in this batch
-        // still runs (so one bad trial does not lose every other
-        // thread's own in-flight work), and the first exception
-        // caught is remembered and rethrown once the whole batch's
-        // own parallel region has finished, so run()'s own caller
-        // sees the same kind of failure it always has.
-        std::exception_ptr firstError;
-#pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
+        // Every rank must agree on whether to stop here, and why, before
+        // any of them acts on it -- see mpiAgreeBatchStop()'s own
+        // comment. In particular, a trial error must not be rethrown
+        // straight away on the rank that had it: the other ranks would
+        // carry on into their next collective call (this same
+        // agreement, or a checkpoint's barriers), while the failing
+        // rank unwound into OutputManagerH5's destructor and its own,
+        // different collective calls, deadlocking every rank.
+        const auto stop = utils::mpiAgreeBatchStop(utils::sigtermWasReceived(), firstError != nullptr);
+
+        // A trial failed somewhere in this batch -- on this rank, or
+        // (under MPI) another. This run is ending abnormally, having
+        // completed fewer than simControls_.nTrial() trials in total --
+        // see OutputManager::notifyEarlyTermination()'s own comment for
+        // why the eventual destructor needs to be told that explicitly,
+        // rather than assuming every trial finished the way it
+        // otherwise would. Every rank then throws from this same point
+        // (see rethrowAgreedError()), so every rank's shutdown runs in
+        // lockstep. An error takes priority over a SIGTERM caught in
+        // the same batch, so the run exits with an error rather than
+        // looking like a clean, restartable interruption.
+        if (stop.error_)
         {
-            try
-            {
-                runTrial(trialNum);
-            }
-            catch (const std::exception& error)
-            {
-#pragma omp critical
-                {
-                    std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
-                    if (!firstError) { firstError = std::current_exception(); }
-                }
-            }
-        }
-        if (firstError)
-        {
-            // This run is ending abnormally, having completed fewer
-            // than simControls_.nTrial() trials in total -- see
-            // OutputManager::notifyEarlyTermination()'s own comment for
-            // why the eventual destructor needs to be told that
-            // explicitly, rather than assuming every trial finished the
-            // way it otherwise would.
             outputManager_->notifyEarlyTermination(
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
-            std::rethrow_exception(firstError);
+            utils::rethrowAgreedError(firstError);
         }
-#else
-        try
-        {
-            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
-            {
-                runTrial(trialNum);
-            }
-        }
-        catch (...)
-        {
-            // See the identical #ifdef _OPENMP branch's own comment
-            outputManager_->notifyEarlyTermination(
-                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
-            throw;
-        }
-#endif
 
         // If SIGTERM was caught somewhere in this batch -- on this
-        // rank, or (under MPI) any other rank, since mpiAllReceivedSigterm()
-        // reconciles every rank onto the same decision here (see its
-        // own comment for why every rank must agree, rather than each
-        // deciding independently from its own local signal state alone)
-        // -- this is the correct, safe point to stop: every trial
+        // rank, or (under MPI) any other rank, since mpiAgreeBatchStop()
+        // reconciles every rank onto the same decision here -- this is
+        // the correct, safe point to stop: every trial
         // actually started has now finished (runTrial()'s own check
         // only ever stops a trial from starting in the first place),
         // so it is safe to save the currently-open checkpoint (or,
@@ -332,7 +354,7 @@ auto core::SimCluster::run() -> int
         // count of its own (see notifyEarlyTermination()'s own
         // comment) -- and return sigtermExitCode instead of continuing
         // on to any later, not-yet-started batches.
-        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
+        if (stop.sigterm_)
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
@@ -342,6 +364,16 @@ auto core::SimCluster::run() -> int
                 printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
+        }
+
+        // Test-only fault injection; see testFailRank_'s own comment.
+        // Thrown on one rank alone, after the agreement above, so it
+        // stands in for any error the other ranks never hear about.
+        if (batchStart == numberingStart &&
+            testFailRank_ == static_cast<unsigned long>(utils::mpiRank()))
+        {
+            throw std::runtime_error("injected test failure (SLUG_TEST_FAIL_RANK = " +
+                std::to_string(utils::mpiRank()) + ")");
         }
 
         // No SIGTERM was caught, so every trial in [batchStart,

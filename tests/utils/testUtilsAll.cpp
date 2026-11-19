@@ -39,6 +39,8 @@ auto main() -> int {
         result += testMPIUtilsSingleProcess();
         result += testSplitSearchPath();
         result += testGetFilePathDataPath();
+        result += testGetEnvULong();
+        result += testMPIUtilsAgreedError();
         return result;
     }
     catch (const std::exception& error)

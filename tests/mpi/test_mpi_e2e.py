@@ -17,6 +17,7 @@ else, the skipif below makes it a no-op.
 
 import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -221,3 +222,138 @@ def test_mpi_run_wide_messages_are_printed_once(tmp_path, nranks):
     assert result.stdout.count("input deck key 'nebular.stray_key'") == 1, result.stdout
     assert result.stdout.count("slug: cluster simulation starting") == 1, result.stdout
     assert result.stdout.count("slug: simulation complete") == 1, result.stdout
+
+
+# How long a run that is meant to fail may take before the test treats
+# it as hung. Each of the runs below takes about a second when it
+# shuts down correctly; a deadlocked run never finishes.
+FAILURE_TIMEOUT = 60
+
+
+def run_slug_expecting_failure(deck_path, nranks, extra_env):
+    """
+    Run slug under mpiexec with extra environment variables set (the
+    test-only SLUG_TEST_FAIL_* hooks; see SimCluster's own
+    testFailTrial_/testFailRank_ members), and require it to exit
+    promptly with a nonzero status. A run that never exits is the
+    deadlock these tests guard against, so a timeout fails the test
+    rather than erroring out.
+    """
+    cmd = ([MPIEXEC_EXECUTABLE, MPIEXEC_NUMPROC_FLAG, str(nranks)] + _OVERSUBSCRIBE_FLAG +
+           [SLUG_EXECUTABLE, str(deck_path)])
+    # Start from neither hook set, whatever the parent environment holds,
+    # so each test gets only the failure it asks for
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SLUG_TEST_FAIL_")}
+    env.update(extra_env)
+    # Started in its own session so that, on a timeout, every process
+    # left in it can be killed at once. Deadlocked ranks would otherwise
+    # outlive the test, busy-waiting in MPI. SIGKILL to mpiexec alone is
+    # not enough: Open MPI's launcher puts the ranks in a process group
+    # of their own, so SIGTERM mpiexec first, which forwards the signal
+    # and then SIGKILLs every rank still running.
+    proc = subprocess.Popen(
+        cmd, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=FAILURE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            stdout, stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # the launcher's group is already gone; just report below
+            try:
+                stdout, stderr = proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                stdout = stderr = "(output unavailable: pipes held by surviving processes)"
+        pytest.fail(
+            f"{' '.join(cmd)} with {extra_env} did not exit within "
+            f"{FAILURE_TIMEOUT} s (deadlocked?)\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    assert proc.returncode != 0, (
+        f"{' '.join(cmd)} with {extra_env} exited 0, but was expected to fail\n"
+        f"stdout:\n{stdout}\nstderr:\n{stderr}"
+    )
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+# Trial 2 runs on rank 0 in the first batch; trial 17 runs on rank 2
+# in the second, after a checkpoint has already been written. With 4
+# ranks, each batch of 10 splits as 3, 3, 2, 2 trials (e.g. [10, 20) as
+# 10-12, 13-15, 16-17, 18-19), and a failing rank completes only the
+# trials before the failing one, so the failed batch's checkpoint must
+# record 2 + 3 + 2 + 2 = 9 trials completed in total for trial 2, and
+# 10 + (3 + 3 + 1 + 2) = 19 for trial 17.
+@pytest.mark.parametrize(("fail_trial", "expected_trials"), [(2, 9), (17, 19)])
+def test_mpi_trial_error_stops_every_rank_cleanly(tmp_path, fail_trial, expected_trials):
+    """
+    A trial that throws on one rank must end the whole run promptly,
+    with a nonzero exit status and the error reported, rather than
+    deadlocking it. This is the regression test for a production run
+    that hung for hours: the failing rank rethrew its trial's
+    exception straight away, unwinding into OutputManagerH5's
+    destructor and its MPI_Barrier, while every other rank waited
+    forever in the end-of-batch MPI_Allreduce. Now every rank agrees,
+    at the end of the batch, to stop on the error (see
+    utils::mpiAgreeBatchStop()/rethrowAgreedError()), so every rank
+    shuts down in lockstep without MPI_Abort: every output file is
+    closed, and so still readable, and the failed batch's checkpoint has
+    a file from every rank, each carrying the run-wide trials_completed
+    that only the cross-rank checkpoint sync writes.
+    """
+    deck = tmp_path / "trial_error.in"
+    deck.write_text(DECK_TEMPLATE.format(
+        n_trial=40, model_name="mpi_trial_error", out_dir=tmp_path,
+        output_mode="h5divided", checkpoint_interval=10,
+    ))
+    result = run_slug_expecting_failure(
+        deck, nranks=4, extra_env={"SLUG_TEST_FAIL_TRIAL": str(fail_trial)})
+
+    assert f"slug: trial {fail_trial} failed: injected test failure" in result.stderr, result.stderr
+    assert "slug: simulation failed" in result.stderr, result.stderr
+    # A clean, agreed shutdown, not the MPI_Abort backstop
+    assert "MPI_ABORT" not in result.stdout + result.stderr, result.stdout + result.stderr
+
+    files = sorted(tmp_path.glob("mpi_trial_error_chk*/rank_*.h5"))
+    assert files, "no per-rank output files were written"
+    for h5_path in files:
+        with h5py.File(h5_path, "r") as f:
+            assert "trials_completed" in f.attrs, h5_path
+
+    # The failed batch is the last checkpoint written. Its files are
+    # rank_NNNN.h5 without OpenMP, rank_NNNN_thread_MMMM.h5 with it.
+    failed_checkpoint = max(path.parent for path in files)
+    failed_files = sorted(failed_checkpoint.glob("rank_*.h5"))
+    ranks = {int(path.name.split("_")[1].split(".")[0]) for path in failed_files}
+    assert ranks == {0, 1, 2, 3}, failed_files
+    for h5_path in failed_files:
+        with h5py.File(h5_path, "r") as f:
+            assert f.attrs["trials_completed"] == expected_trials, h5_path
+
+
+@pytest.mark.parametrize("fail_rank", [0, 1])
+def test_mpi_unagreed_error_aborts_every_rank(tmp_path, fail_rank):
+    """
+    An error that only one rank knows about, thrown outside the
+    end-of-batch agreement (injected via SLUG_TEST_FAIL_RANK, after
+    that agreement and before the checkpoint rollover every other rank
+    goes on to), must still end the whole run promptly with a nonzero
+    exit status and the error reported. The failing rank must not
+    attempt OutputManagerH5's collective shutdown (the other ranks
+    would never match it -- see utils::unwindingFromLocalError()), and
+    main() must then abort every rank (utils::mpiAbortIfMultiRank()).
+    """
+    deck = tmp_path / "rank_error.in"
+    deck.write_text(DECK_TEMPLATE.format(
+        n_trial=40, model_name="mpi_rank_error", out_dir=tmp_path,
+        output_mode="h5", checkpoint_interval=10,
+    ))
+    result = run_slug_expecting_failure(
+        deck, nranks=4, extra_env={"SLUG_TEST_FAIL_RANK": str(fail_rank)})
+
+    assert (f"slug: simulation failed on MPI rank {fail_rank}: injected test failure"
+            in result.stderr), result.stderr

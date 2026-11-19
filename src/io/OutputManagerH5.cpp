@@ -11,7 +11,7 @@
 #include "../core/Galaxy.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
-#include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- every symbol from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) is used directly, but only inside "#ifdef SLUG_MPI" blocks; a build not compiled with SLUG_MPI (every target except slug) elides all of them, making the check think this include is unused for that specific configuration
+#include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- most symbols from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) are used only inside "#ifdef SLUG_MPI" blocks, which a build not compiled with SLUG_MPI (every target except slug) elides, so the check can misjudge which of them this file uses in that configuration
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -26,6 +26,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstddef>
+#include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; see the identical NOLINT in SimCluster.cpp
 #include <filesystem>
 #include <iomanip> // NOLINT(misc-include-cleaner) -- used for std::setw/std::setfill in the constructor's own thread_NNNN.h5 filename construction
 #include <iostream>
@@ -705,10 +706,26 @@ void io::OutputManagerH5::restartSetup() // NOLINT(readability-function-cognitiv
 void io::OutputManagerH5::checkpoint(const unsigned long trialsCompleted)
 {
 #ifdef _OPENMP
+    // An exception must not escape an OpenMP parallel region (that
+    // terminates the process, before main() could report the error or
+    // abort the other MPI ranks), so each thread's is caught here, and
+    // the first rethrown once the team has joined
+    std::exception_ptr closeError;
 #pragma omp parallel
     {
-        closeOutputFile(trialsCompleted);
+        try
+        {
+            closeOutputFile(trialsCompleted);
+        }
+        catch (...)
+        {
+#pragma omp critical
+            {
+                if (!closeError) { closeError = std::current_exception(); }
+            }
+        }
     }
+    if (closeError) { std::rethrow_exception(closeError); }
 #else
     closeOutputFile(trialsCompleted);
 #endif
@@ -1524,6 +1541,24 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
         }
     }
 
+    // This rank is being destroyed while unwinding from an error the
+    // other ranks never agreed on (see utils::unwindingFromLocalError()):
+    // they are still running, or already waiting in some other
+    // collective call, so the barriers in syncCheckpoints() below would
+    // never be matched, and this rank would hang here forever instead
+    // of reaching main(), which reports the error and aborts every
+    // rank (utils::mpiAbortIfMultiRank()). This rank's own files are
+    // closed above, so they are at least readable; the cross-rank sync
+    // and consolidation are skipped, since the other ranks' files are
+    // still open and incomplete.
+    if (utils::unwindingFromLocalError())
+    {
+        std::cerr << "slug: OutputManagerH5: rank " << utils::mpiRank() <<
+            " is stopping on an error the other MPI ranks have not seen; "
+            "skipping the final checkpoint sync and consolidation\n";
+        return;
+    }
+
     // See syncCheckpoints()'s own header comment: this is the final
     // checkpoint's own sync, exactly mirroring the one checkpoint()
     // itself does mid-run -- a no-op outside MPI.
@@ -1608,27 +1643,50 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
 // critical section
 void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
 {
+    // Every handle is reset to -1 (the "not open" sentinel -- see
+    // openOutputFile()) once closed, and a file already closed is
+    // skipped entirely, so a second call is harmless. That happens if
+    // checkpoint() closes this thread's file and then fails (e.g. in
+    // syncCheckpoints()) before opening the next: the destructor then
+    // closes again, and writing attributes to a closed file would
+    // throw. Any exception from the attribute writes is held until
+    // after the critical section, since an exception must not leave an
+    // OpenMP critical construct, and the file is closed regardless.
+    std::exception_ptr error;
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
         // NOLINTBEGIN(misc-include-cleaner)
-        if (clustersGroup_() >= 0) { H5Gclose(clustersGroup_()); }
-        if (clusterSpectraGroup_() >= 0) { H5Gclose(clusterSpectraGroup_()); }
-        if (clusterPhotGroup_() >= 0) { H5Gclose(clusterPhotGroup_()); }
-        if (clusterYieldsGroup_() >= 0) { H5Gclose(clusterYieldsGroup_()); }
-        if (galaxyGroup_() >= 0) { H5Gclose(galaxyGroup_()); }
-        if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
-        if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
-        if (galaxyYieldsGroup_() >= 0) { H5Gclose(galaxyYieldsGroup_()); }
-        if (clusterFeedbackGroup_() >= 0) { H5Gclose(clusterFeedbackGroup_()); }
-        if (galaxyFeedbackGroup_() >= 0) { H5Gclose(galaxyFeedbackGroup_()); }
-        utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
-        utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
-        utils::writeULongAttr(file_(), "max_trial", maxTrial_);
-        H5Fclose(file_());
+        if (file_() >= 0)
+        {
+            for (auto* const group : { &clustersGroup_, &clusterSpectraGroup_,
+                    &clusterPhotGroup_, &clusterYieldsGroup_, &galaxyGroup_,
+                    &galaxySpectraGroup_, &galaxyPhotGroup_, &galaxyYieldsGroup_,
+                    &clusterFeedbackGroup_, &galaxyFeedbackGroup_ })
+            {
+                if ((*group)() >= 0)
+                {
+                    H5Gclose((*group)());
+                    (*group)() = -1;
+                }
+            }
+            try
+            {
+                utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
+                utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
+                utils::writeULongAttr(file_(), "max_trial", maxTrial_);
+            }
+            catch (...)
+            {
+                error = std::current_exception();
+            }
+            H5Fclose(file_());
+            file_() = -1;
+        }
         // NOLINTEND(misc-include-cleaner)
     }
+    if (error) { std::rethrow_exception(error); }
 }
 
 // See this class's own header comment for the full design
@@ -1643,64 +1701,84 @@ void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long t
     // rank 0 starts reading any of their files below.
     utils::mpiBarrier();
 
+    // Anything rank 0 throws below is held until after the final
+    // barrier, rather than propagating straight away: every other rank
+    // is already on its way to that barrier, and would wait in it
+    // forever if rank 0 never arrived.
+    std::exception_ptr rank0Error;
     if (utils::mpiRank() == 0)
     {
-        const std::string modelName = (simControls_.checkpointInterval() != 0) ?
-            checkpointModelName(checkpointNumber_) : simControls_.modelName();
-        const auto dirPath = std::filesystem::path(simControls_.outDir()) / modelName;
-
-        // This rank's (rank 0's) own values are already known directly
-        // -- trialsCompleted is this call's own argument, and maxTrial_
-        // is already this object's own up-to-date member -- so only
-        // every *other* rank's own files need to be read back.
-        //
-        // trialsCompleted (like every other rank's own passed-in
-        // value) is priorTrialsCompleted + this rank's own session-
-        // local count (see SimCluster::run()'s/SimGalaxy::run()'s own
-        // callers) -- priorTrialsCompleted being a *global* quantity,
-        // carried over identically on every rank from a restart (see
-        // restartTrialsDone()), not a per-rank one. Summing every
-        // rank's own raw value directly would therefore count that
-        // shared prefix once per rank instead of once overall, so it
-        // is subtracted out of each rank's own value before summing
-        // (reducing it to that rank's own session-local count alone),
-        // then added back exactly once at the end. A no-op whenever
-        // this is not a restarted run, since restartTrialsDone_ is 0.
-        unsigned long globalTrialsCompleted = trialsCompleted - restartTrialsDone_;
-        unsigned long globalMaxTrial = maxTrial_;
-        const int size = utils::mpiSize();
-        for (int rank = 1; rank < size; ++rank)
+        try
         {
-            // Every one of this rank's own files already agrees with
-            // each other (each of its own threads' closeOutputFile()
-            // wrote the identical rank-local value into its own file),
-            // so reading the first is enough.
-            const auto files = filesForRank(dirPath, rank);
-            const auto attrs = readCheckpointAttrs(files.front(),
-                dirPath.string() + " (its own directory)");
-            globalTrialsCompleted += (attrs.trialsCompleted_ - restartTrialsDone_);
-            globalMaxTrial = std::max(globalMaxTrial, attrs.maxTrial_);
-        }
-        globalTrialsCompleted += restartTrialsDone_;
+            const std::string modelName = (simControls_.checkpointInterval() != 0) ?
+                checkpointModelName(checkpointNumber_) : simControls_.modelName();
+            const auto dirPath = std::filesystem::path(simControls_.outDir()) / modelName;
 
-        // NOLINTBEGIN(misc-include-cleaner)
-        for (int rank = 0; rank < size; ++rank)
-        {
-            for (const auto& path : filesForRank(dirPath, rank))
+            // This rank's (rank 0's) own values are already known directly
+            // -- trialsCompleted is this call's own argument, and maxTrial_
+            // is already this object's own up-to-date member -- so only
+            // every *other* rank's own files need to be read back.
+            //
+            // trialsCompleted (like every other rank's own passed-in
+            // value) is priorTrialsCompleted + this rank's own session-
+            // local count (see SimCluster::run()'s/SimGalaxy::run()'s own
+            // callers) -- priorTrialsCompleted being a *global* quantity,
+            // carried over identically on every rank from a restart (see
+            // restartTrialsDone()), not a per-rank one. Summing every
+            // rank's own raw value directly would therefore count that
+            // shared prefix once per rank instead of once overall, so it
+            // is subtracted out of each rank's own value before summing
+            // (reducing it to that rank's own session-local count alone),
+            // then added back exactly once at the end. A no-op whenever
+            // this is not a restarted run, since restartTrialsDone_ is 0.
+            unsigned long globalTrialsCompleted = trialsCompleted - restartTrialsDone_;
+            unsigned long globalMaxTrial = maxTrial_;
+            const int size = utils::mpiSize();
+            for (int rank = 1; rank < size; ++rank)
             {
-                const hid_t file = H5Fopen(path.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
-                if (file < 0)
-                {
-                    throw std::runtime_error(
-                        "OutputManagerH5::syncCheckpoints: unable to reopen " +
-                        path.string() + " for updating");
-                }
-                utils::overwriteULongAttr(file, "trials_completed", globalTrialsCompleted);
-                utils::overwriteULongAttr(file, "max_trial", globalMaxTrial);
-                H5Fclose(file);
+                // Every one of this rank's own files already agrees with
+                // each other (each of its own threads' closeOutputFile()
+                // wrote the identical rank-local value into its own file),
+                // so reading the first is enough.
+                const auto files = filesForRank(dirPath, rank);
+                const auto attrs = readCheckpointAttrs(files.front(),
+                    dirPath.string() + " (its own directory)");
+                globalTrialsCompleted += (attrs.trialsCompleted_ - restartTrialsDone_);
+                globalMaxTrial = std::max(globalMaxTrial, attrs.maxTrial_);
             }
+            globalTrialsCompleted += restartTrialsDone_;
+
+            // NOLINTBEGIN(misc-include-cleaner)
+            for (int rank = 0; rank < size; ++rank)
+            {
+                for (const auto& path : filesForRank(dirPath, rank))
+                {
+                    const hid_t file = H5Fopen(path.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+                    if (file < 0)
+                    {
+                        throw std::runtime_error(
+                            "OutputManagerH5::syncCheckpoints: unable to reopen " +
+                            path.string() + " for updating");
+                    }
+                    try
+                    {
+                        utils::overwriteULongAttr(file, "trials_completed", globalTrialsCompleted);
+                        utils::overwriteULongAttr(file, "max_trial", globalMaxTrial);
+                    }
+                    catch (...)
+                    {
+                        H5Fclose(file);
+                        throw;
+                    }
+                    H5Fclose(file);
+                }
+            }
+            // NOLINTEND(misc-include-cleaner)
         }
-        // NOLINTEND(misc-include-cleaner)
+        catch (...)
+        {
+            rank0Error = std::current_exception();
+        }
     }
 
     // Precautionary rather than strictly required by this process's
@@ -1710,6 +1788,7 @@ void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long t
     // syncCheckpoints() returns on every rank, rather than one that
     // only holds on rank 0.
     utils::mpiBarrier();
+    if (rank0Error) { std::rethrow_exception(rank0Error); }
 #endif
 }
 
