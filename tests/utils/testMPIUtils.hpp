@@ -65,6 +65,15 @@ inline auto testMPIUtilsSingleProcess() -> int
             }
         }
     }
+    for (const bool flag : { false, true })
+    {
+        if (utils::mpiAnyRank(flag) != flag)
+        {
+            std::cerr << "testMPIUtilsSingleProcess: mpiAnyRank(" << flag
+                << ") should return its own input for one rank\n";
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -196,6 +205,21 @@ inline auto testMPIUtilsAgreedError() -> int
         std::cerr << "testMPIUtilsAgreedError: errorIsAgreed() should be true "
             "after rethrowAgreedError(nullptr)\n";
         return 1;
+    }
+
+    // ...with the caller's own message, if one is given
+    try
+    {
+        utils::rethrowAgreedError(nullptr, "custom message");
+    }
+    catch (const std::runtime_error& e)
+    {
+        if (std::string_view(e.what()) != "custom message")
+        {
+            std::cerr << "testMPIUtilsAgreedError: rethrowAgreedError() ignored its "
+                "message argument: " << e.what() << "\n";
+            return 1;
+        }
     }
     return 0;
 }

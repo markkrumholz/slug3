@@ -13,6 +13,7 @@
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr; see the identical NOLINT in SimCluster.cpp
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -388,16 +389,58 @@ namespace io
          * destructor's own comment, and OutputManager::
          * notifyEarlyTermination()'s own comment for the full
          * rationale. Does not itself close anything, or roll over to a
-         * new checkpoint: SimCluster::run()/SimGalaxy::run() call this
-         * and then simply return, leaving the currently-open
-         * checkpoint (or, without checkpointing, the run's own single
-         * output file) for the ordinary destructor to close, same as
-         * it always does once this object goes out of scope.
+         * new checkpoint: the currently-open checkpoint (or, without
+         * checkpointing, the run's own single output file) is closed
+         * afterwards by finalize(), which SimCluster::run()/
+         * SimGalaxy::run() call next on a normal completion or a caught
+         * SIGTERM, or otherwise by the destructor.
          */
         void notifyEarlyTermination(unsigned long trialsCompleted) override
         { earlyTerminationTrialsCompleted_ = trialsCompleted; }
 
+        /**
+         * @brief Close, sync, and consolidate this run's output, reporting any failure on every rank
+         * @throws The first exception this rank hit while doing so, or,
+         *   on a rank that hit none while another rank did, a
+         *   std::runtime_error saying so (see utils::rethrowAgreedError())
+         * @details
+         * See OutputManager::finalize() for when to call this. Runs
+         * shutDown() -- exactly what the destructor would otherwise do
+         * -- and then agrees across MPI ranks (utils::mpiAnyRank())
+         * whether any of them failed, so that every rank throws, and
+         * the run exits with an error everywhere, rather than only the
+         * rank that happened to hit it. Only rank 0 consolidates, for
+         * example, and the checkpoint sync's file updates also happen on
+         * rank 0 alone. Every rank throws from the same point, as an
+         * agreed error, so the program then shuts down normally on all
+         * of them, without an MPI_Abort. Does nothing if called again.
+         *
+         * Test-only fault injection: if the environment variable
+         * SLUG_TEST_FAIL_FINALIZE_RANK, read once by the constructor,
+         * names this MPI rank, this rank reports an injected failure
+         * after shutDown() succeeds (see tests/io and tests/mpi).
+         */
+        void finalize() override;
+
     private:
+
+        /**
+         * @brief Close every thread's output file, then sync and consolidate checkpoints, logging each failure
+         * @return The first exception hit along the way, or a null
+         *   exception_ptr if none was
+         * @details
+         * The body of both finalize() and the destructor, which differ
+         * only in what they do with a failure: finalize() reports it,
+         * while the destructor cannot throw, so it relies on the
+         * logging here alone. Each failure is printed to std::cerr as
+         * it happens, and every remaining step is still attempted. Sets
+         * finalized_ first, so that it runs at most once. If this rank
+         * is unwinding from an error the other ranks have not agreed on
+         * (see utils::unwindingFromLocalError()), it stops after closing
+         * this rank's own files: the cross-rank sync would never
+         * complete, and the other ranks' files are still open.
+         */
+        auto shutDown() -> std::exception_ptr;
 
         /**
          * @brief Find the most recent checkpoint on disk and resume from it
@@ -959,6 +1002,15 @@ namespace io
         // own long-standing assumption, unchanged from before this
         // existed.
         std::optional<unsigned long> earlyTerminationTrialsCompleted_;
+
+        // Whether shutDown() has run (via finalize() or the destructor),
+        // after which every output file is closed and there is nothing
+        // left for either to do. Only ever touched from outside any
+        // parallel region.
+        bool finalized_ = false;
+
+        // Test-only fault injection; see finalize()'s own comment
+        std::optional<unsigned long> testFailFinalizeRank_;
 
         // Each thread's own copy of every HDF5 handle below is
         // private to it -- see this class's own header comment on why

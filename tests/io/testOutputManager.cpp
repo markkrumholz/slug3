@@ -14,6 +14,7 @@
 #include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/utils/Constants.hpp"
 #include "../src/utils/HDF5Utils.hpp"
+#include "../src/utils/MPIUtils.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -22,6 +23,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -4837,6 +4839,198 @@ static auto testRestartWithDefaultOutDir() -> int
     return result;
 }
 
+// A restart that finds no checkpoint explains a collision at its very
+// first output (see testRestartWithDefaultOutDir), but not one at a
+// later checkpoint rollover: by then the run has written output of its
+// own, so the collision has nothing to do with what the restart's
+// search found. Here a stray directory named like checkpoint 1's file
+// is ignored by the search, so the run starts at checkpoint 0 and only
+// collides when rolling over to checkpoint 1. The rollover leaves
+// checkpoint 0's files already closed, so this also checks that the
+// destructor then closes nothing twice.
+static auto testRestartHintNotAtRollover() -> int
+{
+    const auto runDir = std::filesystem::temp_directory_path() / "slugTestRestartHintRollover";
+    std::filesystem::remove_all(runDir);
+    const std::string modelName = "test_restart_hint_rollover";
+    std::filesystem::create_directories(runDir / (modelName + "_chk00001.h5"));
+
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, runDir);
+    inputDeck.at_path("output").as_table()->insert("checkpoint_interval", int64_t{2});
+    inputDeck.insert_or_assign("n_trial", int64_t{6});
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        io::OutputManagerH5 manager(controls, /* restart = */ true);
+        try
+        {
+            manager.checkpoint(2);
+            std::cerr << "testOutputManager: restart hint at rollover: expected the "
+                "rollover onto the stray checkpoint 1 path to throw\n";
+            return 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            const std::string_view what(e.what());
+            if (!what.contains("already exists") || what.contains("--restart"))
+            {
+                std::cerr << "testOutputManager: restart hint at rollover: expected an "
+                    "\"already exists\" error without the restart hint, got: " << what << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testOutputManager: restart hint at rollover: unexpected "
+            "exception: " << e.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Saves the process-wide agreed-error flag (see
+// utils::rethrowAgreedError(), which a failing finalize() calls) and
+// restores it on destruction, so that a test of a failing finalize()
+// leaves no trace for later tests in this binary
+class ScopedAgreedErrorFlagIo
+{
+public:
+    ScopedAgreedErrorFlagIo() : saved_(utils::detail::errorAgreedFlag()) {}
+    ScopedAgreedErrorFlagIo(const ScopedAgreedErrorFlagIo&) = delete;
+    ScopedAgreedErrorFlagIo(ScopedAgreedErrorFlagIo&&) = delete;
+    auto operator=(const ScopedAgreedErrorFlagIo&) -> ScopedAgreedErrorFlagIo& = delete;
+    auto operator=(ScopedAgreedErrorFlagIo&&) -> ScopedAgreedErrorFlagIo& = delete;
+    ~ScopedAgreedErrorFlagIo() { utils::detail::errorAgreedFlag() = saved_; }
+
+private:
+    bool saved_; /**< The flag's value before construction */
+};
+
+// Check that h5Path exists, opens, and carries a trials_completed
+// attribute -- i.e. that its writer closed it properly
+static auto h5FileClosedProperly(const std::filesystem::path& h5Path) -> bool
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0) { return false; }
+    const bool hasAttr = H5Aexists(file, "trials_completed") > 0;
+    H5Fclose(file);
+    // NOLINTEND(misc-include-cleaner)
+    return hasAttr;
+}
+
+// OutputManagerH5::finalize() closes (and, with OpenMP, consolidates)
+// the output, after which destruction does nothing more; a second call
+// is a no-op. If finishing the output fails, finalize() throws, where
+// the destructor could only log it: an injected failure
+// (SLUG_TEST_FAIL_FINALIZE_RANK, works in any build) and, with OpenMP,
+// a real one -- the per-thread output directory moved away before
+// consolidation, so consolidating it fails.
+static auto testFinalizeReportsFailure() -> int
+{
+#ifdef _WIN32
+    return 0;
+#else
+    const ScopedAgreedErrorFlagIo flagGuard;
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestFinalize";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    int result = 0;
+
+    // Success, and a repeated call
+    try
+    {
+        const std::string modelName = "test_finalize_ok";
+        const io::SimControls controls(makeClusterPhysicsInputDeck(modelName, outDir));
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.finalize();
+            manager.finalize();
+        }
+        if (!h5FileClosedProperly(outDir / (modelName + ".h5")))
+        {
+            std::cerr << "testOutputManager: finalize: the output of a successful "
+                "finalize() is missing or was not closed properly\n";
+            result += 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testOutputManager: finalize: unexpected exception from a "
+            "successful finalize(): " << e.what() << "\n";
+        result += 1;
+    }
+
+    // An injected failure: finalize() must throw it, having still
+    // closed the output
+    {
+        const std::string modelName = "test_finalize_injected";
+        setenv("SLUG_TEST_FAIL_FINALIZE_RANK", "0", 1); // NOLINT(concurrency-mt-unsafe,misc-include-cleaner) -- single-threaded test; setenv is POSIX <stdlib.h>
+        try
+        {
+            const io::SimControls controls(makeClusterPhysicsInputDeck(modelName, outDir));
+            io::OutputManagerH5 manager(controls);
+            unsetenv("SLUG_TEST_FAIL_FINALIZE_RANK"); // NOLINT(concurrency-mt-unsafe,misc-include-cleaner) -- as above
+            manager.finalize();
+            std::cerr << "testOutputManager: finalize: expected the injected failure "
+                "to make finalize() throw\n";
+            result += 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            if (!std::string_view(e.what()).contains("SLUG_TEST_FAIL_FINALIZE_RANK"))
+            {
+                std::cerr << "testOutputManager: finalize: unexpected error: " << e.what() << "\n";
+                result += 1;
+            }
+        }
+        unsetenv("SLUG_TEST_FAIL_FINALIZE_RANK"); // NOLINT(concurrency-mt-unsafe,misc-include-cleaner) -- as above
+        if (!h5FileClosedProperly(outDir / (modelName + ".h5")))
+        {
+            std::cerr << "testOutputManager: finalize: the output was not closed "
+                "properly before the injected failure was reported\n";
+            result += 1;
+        }
+    }
+
+#ifdef _OPENMP
+    // A real failure: consolidation finds its per-thread directory gone
+    try
+    {
+        const std::string modelName = "test_finalize_consolidate";
+        const io::SimControls controls(makeClusterPhysicsInputDeck(modelName, outDir));
+        io::OutputManagerH5 manager(controls);
+        std::filesystem::rename(outDir / modelName, outDir / (modelName + "_moved"));
+        try
+        {
+            manager.finalize();
+            std::cerr << "testOutputManager: finalize: expected a failed consolidation "
+                "to make finalize() throw\n";
+            result += 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            if (!std::string_view(e.what()).contains("consolidateFiles"))
+            {
+                std::cerr << "testOutputManager: finalize: unexpected error from a failed "
+                    "consolidation: " << e.what() << "\n";
+                result += 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testOutputManager: finalize: unexpected exception setting up "
+            "the failed consolidation: " << e.what() << "\n";
+        result += 1;
+    }
+#endif
+    return result;
+#endif // _WIN32
+}
+
 auto testOutputManager() -> int
 {
     int result = 0;
@@ -4889,5 +5083,7 @@ auto testOutputManager() -> int
     result += testWriteGalaxyFeedbackAscii();
     result += testFeedbackOrYieldsOnlyOutputAllowed();
     result += testRestartWithDefaultOutDir();
+    result += testRestartHintNotAtRollover();
+    result += testFinalizeReportsFailure();
     return result;
 }

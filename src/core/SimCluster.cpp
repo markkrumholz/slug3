@@ -359,6 +359,7 @@ auto core::SimCluster::run() -> int
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
+            outputManager_->finalize();
             if (simControls_.verbosity() > 0)
             {
                 printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
@@ -403,6 +404,14 @@ auto core::SimCluster::run() -> int
     // already agree whenever every trial actually completed.
     outputManager_->notifyEarlyTermination(
         priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
+
+    // Close, sync, and consolidate the output now, rather than leaving
+    // it to outputManager_'s destructor, so that a failure there
+    // reaches this run's exit status (as an exception, on every rank)
+    // instead of only being logged -- see OutputManager::finalize().
+    // The SIGTERM return above does the same; a run ending on a trial
+    // error does not, and leaves it to the destructor.
+    outputManager_->finalize();
 
     // I/O rank only, like the starting summary above: by here every
     // rank has passed notifyEarlyTermination()'s own synchronization,

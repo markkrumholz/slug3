@@ -12,6 +12,7 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- most symbols from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) are used only inside "#ifdef SLUG_MPI" blocks, which a build not compiled with SLUG_MPI (every target except slug) elides, so the check can misjudge which of them this file uses in that configuration
+#include "../utils/MiscUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -454,7 +455,8 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
 // happens below.
 io::OutputManagerH5::OutputManagerH5(
     const SimControls& simControls, const bool restart) :
-    OutputManager(simControls)
+    OutputManager(simControls),
+    testFailFinalizeRank_(utils::getEnvULong("SLUG_TEST_FAIL_FINALIZE_RANK"))
 {
     // See this constructor's own header comment for why this is
     // unreachable from the CLI in practice, but still worth guarding
@@ -1548,8 +1550,42 @@ void io::OutputManagerH5::openGalaxyFeedbackGroup()
 // consolidates (see its own comment), so every earlier checkpoint's
 // own thread_NNNN.h5 files are still sitting there, unmerged, until
 // this runs.
-io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- every throwing call below (closeOutputFile(), syncCheckpoints(), consolidateFiles()) is inside its own try/catch, catching std::exception by reference; verified at runtime (real MPI + non-MPI runs alike, including ones that hit closeOutputFile()'s own genuine HDF5 failure paths) that a throw here is caught cleanly rather than escaping. This check's own known limitation (see main.cpp's own identical NOLINT) is that it cannot see through calls into other translation units -- utils::appendFileContents()/utils::overwriteULongAttr(), both defined in HDF5Utils.cpp -- well enough to confirm every type they could throw derives from std::exception, so it stays conservative regardless of the try/catch actually present.
+io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- shutDown() catches every exception from the calls it makes (closeOutputFile(), syncCheckpoints(), consolidateFiles()) by std::exception reference and returns it rather than throwing; this check cannot see through calls into other translation units (utils::appendFileContents()/utils::overwriteULongAttr(), in HDF5Utils.cpp) well enough to confirm every type they could throw derives from std::exception, so it stays conservative regardless
 {
+    // Normally finalize() has already done this, and reported any
+    // failure; this is the fallback for a run ending on an error, or a
+    // caller that never calls finalize(). A destructor cannot throw, so
+    // any failure here is only logged (by shutDown() itself).
+    if (!finalized_) { static_cast<void>(shutDown()); }
+}
+
+// See this method's own header comment
+void io::OutputManagerH5::finalize()
+{
+    if (finalized_) { return; }
+    std::exception_ptr error = shutDown();
+    if (!error && testFailFinalizeRank_ == static_cast<unsigned long>(utils::mpiRank()))
+    {
+        error = std::make_exception_ptr(std::runtime_error(
+            "injected test failure (SLUG_TEST_FAIL_FINALIZE_RANK = " +
+            std::to_string(utils::mpiRank()) + ")"));
+    }
+    if (utils::mpiAnyRank(error != nullptr))
+    {
+        utils::rethrowAgreedError(error, "stopping because finishing the output "
+            "failed on another MPI rank (see that rank's own error message)");
+    }
+}
+
+// See this method's own header comment
+auto io::OutputManagerH5::shutDown() -> std::exception_ptr // NOLINT(readability-function-cognitive-complexity) -- close, sync, and consolidate in sequence, each with its own error handling; it was the destructor's body, unchanged apart from recording the first error, and splitting it further would only add indirection
+{
+    finalized_ = true;
+    std::exception_ptr firstError;
+    const auto record = [&firstError]() -> void
+    {
+        if (!firstError) { firstError = std::current_exception(); }
+    };
     // Ordinarily, being destroyed at all means every trial in the run
     // must already be complete, so simControls_.nTrial() is the right
     // trials_completed to close out with -- there is no partial-run
@@ -1559,13 +1595,11 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
     // comments) and called notifyEarlyTermination() before returning:
     // earlyTerminationTrialsCompleted_ then holds the true count
     // instead, which value_or() prefers here.
-    // Neither closeOutputFile() nor consolidateFiles() may be allowed
-    // to throw out of a destructor (undefined behavior at best, a
-    // std::terminate() at worst if this fires during stack unwinding
-    // from some other exception already in flight) -- both are caught
-    // here and reported to stderr instead, on a strictly best-effort
-    // basis: there is no caller left to hand a thrown exception to by
-    // the time a destructor is running.
+    // Every step's failure is caught, logged, and recorded here, and
+    // the remaining steps still attempted: this runs from the
+    // destructor too, which must not throw (undefined behavior at best,
+    // std::terminate() at worst during unwinding from some other
+    // exception), and finalize() reports the first failure afterwards.
     const auto trialsCompleted =
         earlyTerminationTrialsCompleted_.value_or(simControls_.nTrial());
 #ifdef _OPENMP
@@ -1581,8 +1615,11 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
 #ifdef _OPENMP
 #pragma omp critical
 #endif
-            std::cerr << "slug: OutputManagerH5: error closing output file: "
-                << error.what() << "\n";
+            {
+                std::cerr << "slug: OutputManagerH5: error closing output file: "
+                    << error.what() << "\n";
+                record();
+            }
         }
     }
 
@@ -1601,7 +1638,7 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
         std::cerr << "slug: OutputManagerH5: rank " << utils::mpiRank() <<
             " is stopping on an error the other MPI ranks have not seen; "
             "skipping the final checkpoint sync and consolidation\n";
-        return;
+        return firstError;
     }
 
     // See syncCheckpoints()'s own header comment: this is the final
@@ -1615,6 +1652,7 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
     {
         std::cerr << "slug: OutputManagerH5: error syncing final checkpoint: "
             << error.what() << "\n";
+        record();
     }
 
 #if defined(_OPENMP) || defined(SLUG_MPI)
@@ -1663,6 +1701,7 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
                 {
                     std::cerr << "slug: OutputManagerH5: error consolidating " <<
                         chkPath.string() << ": " << error.what() << "\n";
+                    record();
                 }
             }
         }
@@ -1677,10 +1716,12 @@ io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- 
             {
                 std::cerr << "slug: OutputManagerH5: error consolidating output: "
                     << error.what() << "\n";
+                record();
             }
         }
     }
 #endif
+    return firstError;
 }
 
 // Close whichever of this thread's own groups are open, then its

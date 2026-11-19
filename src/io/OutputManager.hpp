@@ -392,6 +392,30 @@ namespace io
          */
         virtual void notifyEarlyTermination(unsigned long trialsCompleted) = 0;
 
+        /**
+         * @brief Finish writing this run's output, reporting any failure
+         * @throws std::runtime_error (or whatever the failing operation
+         *   threw) if any part of finishing the output failed -- under
+         *   MPI, on every rank, if it failed on any (see
+         *   OutputManagerH5::finalize())
+         * @details
+         * Call this on every rank, from outside any parallel region,
+         * once the run has finished writing -- after the final
+         * notifyEarlyTermination() -- on a normal completion or a
+         * caught SIGTERM. It does what destruction would otherwise do
+         * (close the output, and for OutputManagerH5 also sync and
+         * consolidate checkpoints), but reports a failure instead of
+         * only logging it: a destructor cannot throw, so failures there
+         * never reach the run's exit status. After this, destruction
+         * does nothing further. A run that is already ending on an
+         * error skips this and leaves it to the destructor.
+         *
+         * The default implementation does nothing, which suits
+         * OutputManagerAscii: its files are plain streams, closed by
+         * their own destructors.
+         */
+        virtual void finalize() {}
+
     protected:
 
         /**

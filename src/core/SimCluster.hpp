@@ -82,7 +82,9 @@ namespace core
          *   throws once any rank has a trial fail: the failing rank
          *   rethrows its own exception, and every other rank throws
          *   a std::runtime_error saying so (see
-         *   utils::rethrowAgreedError())
+         *   utils::rethrowAgreedError()). Also throws, on every rank,
+         *   if finishing the output fails once the trials are done (see
+         *   OutputManager::finalize())
          * @details
          * Installs a handler for SIGTERM before running (restored to
          * whatever was previously installed once this returns, by any
