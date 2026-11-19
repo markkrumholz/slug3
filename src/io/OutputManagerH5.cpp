@@ -1997,23 +1997,35 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
     // comment), not append order, matters for correctness here.
     std::ranges::sort(threadFiles);
 
+    // The consolidated file is built under a temporary name, and given
+    // its real one only once it is complete and closed, so a failure at
+    // any point -- including partway through the initial copy -- never
+    // leaves a partial modelName.h5 behind: a later restart would take
+    // that for a complete checkpoint (see restartSetup(), which prefers
+    // it to the directory). The temporary name does not end in .h5, so
+    // the restart scan ignores it, and is removed on failure. The
+    // per-thread files are removed only after the rename, so until then
+    // they remain the one complete copy of this output. A rename would
+    // silently replace an existing destination, which copy_file() used
+    // to refuse to do, so that is checked for explicitly.
     const auto destPath = path.string() + ".h5";
-    std::filesystem::copy_file(threadFiles.front(), destPath);
-
-    // The per-thread files are removed only once the destination is
-    // complete and closed. If anything fails before then, the partial
-    // destination is removed instead, leaving the per-thread files as
-    // the one complete copy of this output -- a partial modelName.h5
-    // would otherwise be taken for a complete checkpoint by a later
-    // restart (see restartSetup()), which prefers it to the directory.
+    const auto tmpPath = destPath + ".partial";
+    if (std::filesystem::exists(destPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::consolidateFiles: " + destPath + " already exists");
+    }
     try
     {
-        appendIntoConsolidated(destPath, threadFiles);
+        std::filesystem::copy_file(threadFiles.front(), tmpPath,
+            std::filesystem::copy_options::overwrite_existing);
+        appendIntoConsolidated(tmpPath, threadFiles);
+        std::filesystem::rename(tmpPath, destPath);
     }
     catch (...)
     {
         std::error_code ec;
-        std::filesystem::remove(destPath, ec);
+        std::filesystem::remove(tmpPath, ec);
         throw;
     }
 
