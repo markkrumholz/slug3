@@ -179,6 +179,8 @@ class slug_group_reader:
         -------
         bool
             True if key is one of keys(), whether or not that dataset
-            has been read from disk yet; False otherwise.
+            has been read from disk yet; False otherwise, including for
+            any key that is not a str (dataset names always are), so an
+            unhashable key returns False rather than raising TypeError.
         """
-        return key in self._datasets
+        return isinstance(key, str) and key in self._datasets

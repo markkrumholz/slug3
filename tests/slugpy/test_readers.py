@@ -276,6 +276,7 @@ def test_clusters_contains(clusters):
     assert "birth_mass" in clusters
     assert "cov_fac" not in clusters
     assert 0 not in clusters
+    assert [] not in clusters  # unhashable: False, not TypeError
 
 
 def test_clusters_unitful_dataset(clusters):
