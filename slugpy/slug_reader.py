@@ -340,6 +340,7 @@ _PDF_DECK_KEYS: dict[str, tuple[str, str]] = {
     "avDist": ("extinct", "AV"),
     "avDistField": ("extinct", "AV_field"),
     "avNebFac": ("extinct", "neb_factor"),
+    "covFac": ("nebular", "cov_fac"),
     "outTimeDist": ("output", "output_times"),
 }
 
@@ -556,7 +557,7 @@ class slug_reader:
         Mapping of str to PDF : every PDF the run used, keyed by the name
         of the SimControls accessor that holds it -- "imf", "cmf",
         "fehDist", "sfr", "sfrDist", "clf", "avDist", "avDistField",
-        "avNebFac", "outTimeDist" -- for those that were valid for the
+        "avNebFac", "covFac", "outTimeDist" -- for those that were valid for the
         run. Rebuilt from the latest checkpoint's PDFs group, which holds
         each one as a toml descriptor (see PDF.toToml()), so this needs
         none of the PDF files the input deck names; each PDF is

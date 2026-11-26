@@ -1021,6 +1021,15 @@ void io::OutputManagerH5::openClustersGroup()
         utils::writeStringAttr(aVNebDset, "units", "mag");
         H5Dclose(aVNebDset);
     }
+
+    if (simControls_.nebular() != nullptr)
+    {
+        // Nebular covering factor -- see core::Cluster::covFac()
+        const hid_t covFacDset = utils::createExtensible1dDataset(
+            clustersGroup_(), "cov_fac", H5T_NATIVE_DOUBLE);
+        utils::writeStringAttr(covFacDset, "units", "");
+        H5Dclose(covFacDset);
+    }
     // NOLINTEND(misc-include-cleaner)
 }
 
@@ -2072,6 +2081,11 @@ void io::OutputManagerH5::writeCluster(
             utils::appendToDataset(clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE, &aV);
             const double aVNeb = cluster.avNeb();
             utils::appendToDataset(clustersGroup_(), "A_V_neb", H5T_NATIVE_DOUBLE, &aVNeb);
+        }
+        if (simControls_.nebular() != nullptr)
+        {
+            const double covFac = cluster.covFac();
+            utils::appendToDataset(clustersGroup_(), "cov_fac", H5T_NATIVE_DOUBLE, &covFac);
         }
 
         // Flush this thread's own file now, rather than waiting for

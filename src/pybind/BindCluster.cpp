@@ -52,10 +52,11 @@ rng_state : bytes, optional
     Serialized pcg64 rng state (see Cluster.rngState() in the C++ API;
     from Python, typically a value previously read back from an output
     file's clusters/rng dataset) to draw this cluster's star masses
-    (and feh/aV, if applicable) from, in place of the live rng stream
-    -- so the resulting starMasses()/birthMass() come out bitwise
-    identical to whatever cluster originally produced this state. If
-    omitted, mass/feh/aV are all drawn live instead, as normal.
+    (and feh/aV/the nebular covering factor, if applicable) from, in
+    place of the live rng stream -- so the resulting
+    starMasses()/birthMass() come out bitwise identical to whatever
+    cluster originally produced this state. If omitted, all of these
+    are drawn live instead, as normal.
 
 Throws
 ------
@@ -97,6 +98,17 @@ static constexpr std::string_view feHDocstring = R"doc(Return the cluster's [Fe/
 Returns
 -------
 feh : float)doc";
+
+static constexpr std::string_view covFacDocstring = R"doc(Return the covering factor of the cluster's nebula.
+
+Returns
+-------
+cov_fac : float
+    The fraction of the cluster's ionizing photons absorbed by its
+    nebula, drawn from controls.covFac when the cluster was
+    constructed and used whenever its nebular emission is computed;
+    NaN if controls had no nebular emission grid (controls.nebular was
+    None) at construction, in which case none was drawn.)doc";
 
 static constexpr std::string_view starMassesDocstring = R"doc(Return the current list of living stellar masses.
 
@@ -249,6 +261,8 @@ void bindCluster(py::module_& m)
                 formTimeDocstring.data())
         .def("feH", &core::Cluster::feH,
                 feHDocstring.data())
+        .def("covFac", &core::Cluster::covFac,
+                covFacDocstring.data())
         .def("starMasses", &core::Cluster::starMasses,
                 starMassesDocstring.data())
         .def("deadStarMasses", &core::Cluster::deadStarMasses,

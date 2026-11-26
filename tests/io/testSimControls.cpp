@@ -10,6 +10,7 @@
 #include "../src/feedback/FeedbackCommons.hpp"
 #include "../src/feedback/Winds.hpp"
 #include "../src/io/SimControls.hpp"
+#include "../src/nebular/NebularCommons.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegment.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
@@ -17,6 +18,7 @@
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../src/tracks/Tracks3D.hpp"
+#include "../src/utils/ParseUtils.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "../src/yields/YieldChannel.hpp"
 #include "../src/yields/YieldCommons.hpp"
@@ -1132,6 +1134,147 @@ static auto testSimControlsExtinctNebFac() -> int
         return 1;
     }
     catch (const std::runtime_error&) { /* expected */ }
+
+    return 0;
+}
+
+// Verify the nebular covering factor distribution
+// (SimControls::nebControls().covFac_, from nebular.cov_fac): a delta
+// at nebular::defaultCovFac by default; a number read as a delta at
+// that value; a PDF file read as that distribution; a distribution
+// whose support extends outside [0, 1] rejected, whether from the
+// deck, setCovFac(), or setNebControls() (the latter two leaving the
+// old value unchanged); and covFac listed in allPDFs()
+static auto testSimControlsNebularCovFac() -> int
+{
+    constexpr double tightTol = 1e-9;
+    constexpr std::string_view baseDeck = "tests/nebular/assets/testNebular.in";
+    constexpr std::string_view uniformFile = "tests/nebular/assets/covFacUniform.toml";
+    constexpr std::string_view outOfRangeFile = "tests/nebular/assets/covFacOutOfRange.toml";
+    const auto isDeltaAt = [](const pdfs::PDF& pdf, const double x) -> bool
+    {
+        return pdf.valid() && std::abs(pdf.getMin() - x) <= tightTol &&
+            std::abs(pdf.getMax() - x) <= tightTol;
+    };
+    const auto isUniform = [](const pdfs::PDF& pdf) -> bool
+    {
+        return pdf.valid() && std::abs(pdf.getMin() - 0.2) <= tightTol &&
+            std::abs(pdf.getMax() - 0.8) <= tightTol &&
+            std::abs(pdf.expectationValue() - 0.5) <= tightTol;
+    };
+    const auto deckWith = [&](const auto& value) -> toml::table
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("cov_fac", value);
+        return inputDeck;
+    };
+
+    try
+    {
+        // Default: a delta at defaultCovFac, listed in allPDFs()
+        {
+            const io::SimControls controls(toml::parse_file(baseDeck));
+            if (!isDeltaAt(controls.nebControls().covFac_, nebular::defaultCovFac))
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected the default "
+                    "covering factor to be a delta at " << nebular::defaultCovFac << "\n";
+                return 1;
+            }
+            const auto pdfs = controls.allPDFs();
+            const auto it = std::ranges::find_if(pdfs,
+                [](const auto& entry) { return entry.first == "covFac"; });
+            if (it == pdfs.end() || it->second != &controls.nebControls().covFac_)
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected allPDFs() to "
+                    "list nebControls().covFac_ as \"covFac\"\n";
+                return 1;
+            }
+        }
+
+        // A number: a delta at that value
+        {
+            const io::SimControls controls(deckWith(0.25));
+            if (!isDeltaAt(controls.nebControls().covFac_, 0.25))
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected nebular.cov_fac = "
+                    "0.25 to give a delta at 0.25\n";
+                return 1;
+            }
+        }
+
+        // A PDF file: that distribution; then setCovFac() replaces it,
+        // and setCovFac()/setNebControls() reject out-of-range values
+        // without changing it
+        {
+            io::SimControls controls(deckWith(std::string(uniformFile)));
+            if (!isUniform(controls.nebControls().covFac_))
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected nebular.cov_fac = \""
+                    << uniformFile << "\" to give a uniform distribution on [0.2, 0.8]\n";
+                return 1;
+            }
+            controls.setCovFac("0.75");
+            if (!isDeltaAt(controls.nebControls().covFac_, 0.75))
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected setCovFac(\"0.75\") "
+                    "to give a delta at 0.75\n";
+                return 1;
+            }
+            const std::array<std::string, 4> badValues{ "-0.1", "1.5", "nan", std::string(outOfRangeFile) };
+            for (const auto& bad : badValues)
+            {
+                bool threw = false;
+                try { controls.setCovFac(bad); }
+                catch (const std::runtime_error&) { threw = true; }
+                if (!threw || !isDeltaAt(controls.nebControls().covFac_, 0.75))
+                {
+                    std::cerr << "testSimControls: nebularCovFac: expected setCovFac(\""
+                        << bad << "\") to throw and leave the covering factor unchanged\n";
+                    return 1;
+                }
+            }
+            nebular::NebularControls badControls;
+            badControls.covFac_ = utils::initPDFFromString("2.0");
+            bool threw = false;
+            try { controls.setNebControls(std::move(badControls)); }
+            catch (const std::runtime_error&) { threw = true; }
+            if (!threw || !isDeltaAt(controls.nebControls().covFac_, 0.75))
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected setNebControls() "
+                    "with an out-of-range covFac_ to throw and leave it unchanged\n";
+                return 1;
+            }
+            nebular::NebularControls goodControls;
+            goodControls.covFac_ = utils::initPDFFromString(std::string(uniformFile));
+            controls.setNebControls(std::move(goodControls));
+            if (!isUniform(controls.nebControls().covFac_) || !controls.nebControls().computeNeb_)
+            {
+                std::cerr << "testSimControls: nebularCovFac: expected setNebControls() "
+                    "to install the new covFac_ and preserve computeNeb_\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: nebularCovFac: unexpected exception: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    // Out-of-range nebular.cov_fac in the deck should throw, whether a
+    // number or a PDF file
+    for (const auto& deck : { deckWith(-0.1), deckWith(1.5), deckWith(std::string(outOfRangeFile)) })
+    {
+        try
+        {
+            const io::SimControls controls(deck);
+            std::cerr << "testSimControls: nebularCovFac: expected an exception for "
+                "nebular.cov_fac outside [0, 1]\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
 
     return 0;
 }
@@ -4730,6 +4873,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsExtinctNebFac();
+    result += testSimControlsNebularCovFac();
     result += testSimControlsYields();
     result += testSimControlsYieldsNoDecay();
     result += testSimControlsWriteYields();

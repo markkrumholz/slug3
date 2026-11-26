@@ -69,8 +69,11 @@ static auto formatSci(const double value) -> std::string
 // file. hasExtinct adds "a_v" and "a_v_neb" (mag) columns -- the
 // cluster's stellar and nebular V-band extinctions (see
 // core::Cluster::aV()/avNeb()) -- right before "rng", when
-// SimControls::extinct() is set.
-static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
+// SimControls::extinct() is set. hasNebular adds a "cov_fac" column
+// (dimensionless) -- the cluster's nebular covering factor (see
+// core::Cluster::covFac()) -- after those and right before "rng", when
+// SimControls::nebular() is set.
+static void writeClustersHeader(std::ofstream& file, const bool hasExtinct, const bool hasNebular)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(uidWidth) << "uid"
@@ -79,6 +82,7 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::setw(numWidth) << "form_time"
          << std::setw(numWidth) << "feh";
     if (hasExtinct) { file << std::setw(numWidth) << "a_v" << std::setw(numWidth) << "a_v_neb"; }
+    if (hasNebular) { file << std::setw(numWidth) << "cov_fac"; }
     file << std::setw(rngWidth) << "rng" << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(uidWidth) << "none"
@@ -87,8 +91,9 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::setw(numWidth) << "yr"
          << std::setw(numWidth) << "none";
     if (hasExtinct) { file << std::setw(numWidth) << "mag" << std::setw(numWidth) << "mag"; }
+    if (hasNebular) { file << std::setw(numWidth) << "none"; }
     file << std::setw(rngWidth) << "none" << "\n";
-    const int numColumns = hasExtinct ? 6 : 4;
+    const int numColumns = 4 + (hasExtinct ? 2 : 0) + (hasNebular ? 1 : 0);
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-')
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
@@ -707,7 +712,8 @@ void io::OutputManagerAscii::openClustersFile()
         throw std::runtime_error(
             "OutputManagerAscii: unable to open output file " + clustersPath.string());
     }
-    writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr);
+    writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr,
+        simControls_.nebular() != nullptr);
 }
 
 // Open the cluster-spectra output file and write its header, if a
@@ -1098,6 +1104,10 @@ void io::OutputManagerAscii::writeCluster(
         {
             clustersFile_ << std::setw(numWidth) << formatSci(cluster.aV())
                           << std::setw(numWidth) << formatSci(cluster.avNeb());
+        }
+        if (simControls_.nebular() != nullptr)
+        {
+            clustersFile_ << std::setw(numWidth) << formatSci(cluster.covFac());
         }
         clustersFile_ << std::setw(rngWidth) << std::string(cluster.rngState().data()) << "\n";
     }

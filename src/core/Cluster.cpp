@@ -11,6 +11,7 @@
 #include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
+#include "../nebular/NebularCommons.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
@@ -130,6 +131,22 @@ namespace
         if (m < tracks2D.mMin()) { return std::numeric_limits<double>::infinity(); }
         return tracks2D.starLifetime(m);
     }
+
+    /**
+     * @brief Draw a cluster's nebular covering factor
+     * @param controls Simulation controls the cluster is built from
+     * @return A draw from controls.nebControls().covFac_ if
+     *   controls.nebular() is non-null, or a quiet NaN (marking the
+     *   covering factor as unset) if no nebular emission is computed,
+     *   in which case no rng state is consumed
+     * @details Used by both Cluster constructors, at the same point
+     *   in their draw sequences -- see Cluster::covFac().
+     */
+    auto drawCovFac(const io::SimControls& controls) -> double
+    {
+        if (controls.nebular() == nullptr) { return std::numeric_limits<double>::quiet_NaN(); }
+        return controls.nebControls().covFac_.draw();
+    }
 } // namespace
 
 // Constructor
@@ -144,6 +161,7 @@ core::Cluster::Cluster(const unsigned long uid,
     feH_(controls.fehDist().draw()),
     aV_(controls.avDist().valid() ? controls.avDist().draw() : 0.0),
     avNeb_(controls.avDist().valid() ? aV_ * controls.avNebFac().draw() : 0.0),
+    covFac_(drawCovFac(controls)),
     controls_(std::cref(controls)),
     m_(controls.imf().drawTarget(
         controls.fracStochMass() * mass,
@@ -226,13 +244,15 @@ core::Cluster::Cluster(const unsigned long uid,
     feH_(0.0), // placeholder; set in the constructor body below
     aV_(0.0), // placeholder; set in the constructor body below
     avNeb_(0.0), // placeholder; set in the constructor body below
+    covFac_(0.0), // placeholder; set in the constructor body below
     controls_(std::cref(controls)),
     birthNonStochMass_((1.0 - controls.fracStochMass()) * mass),
     birthMass_(0.0), // placeholder; overwritten once m_ is drawn
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
 {
-    // Draw feH_, aV_ and avNeb_ (if valid), and m_ from the given rng state
+    // Draw feH_, aV_ and avNeb_ (if valid), covFac_ (if nebular
+    // emission is on), and m_ from the given rng state
     // rather than the live one: save the live state, temporarily
     // switch to rngState, draw each in the same order the primary
     // constructor does, then restore, so this constructor has no
@@ -242,6 +262,7 @@ core::Cluster::Cluster(const unsigned long uid,
     feH_ = controls.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
     aV_ = controls.avDist().valid() ? controls.avDist().draw() : 0.0; //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
     avNeb_ = controls.avDist().valid() ? aV_ * controls.avNebFac().draw() : 0.0; //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after aV_ above, in the same order as the primary constructor
+    covFac_ = drawCovFac(controls); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after avNeb_ above, in the same order as the primary constructor
     m_ = controls.imf().drawTarget(
         controls.fracStochMass() * mass,
         controls.minStochMass(),
@@ -452,7 +473,7 @@ void core::Cluster::computeSpec()
     const auto neb = sc.nebular();
     if (neb != nullptr)
     {
-        auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_);
+        auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_, covFac_);
         specNeb_ = std::move(nebSpec);
         lineLum_ = std::move(nebLineLum);
     }

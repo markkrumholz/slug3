@@ -1873,6 +1873,177 @@ static void checkGalaxyPhotGroup(const hid_t file, const io::SimControls& contro
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Verify that both output managers write each cluster's nebular
+// covering factor (core::Cluster::covFac()) iff SimControls::nebular()
+// is non-null: as a cov_fac dataset (unitless) in the H5 clusters
+// group, and as a cov_fac column (units "none") in the ascii clusters
+// file, right after a_v/a_v_neb and before rng. Uses
+// testClusterExtinct.in, with nebular emission switched on and a
+// non-delta nebular.cov_fac (so every cluster's value is distinct)
+// for the "on" case, and left at its own compute_neb = false for the
+// "off" case.
+static auto testWriteClusterCovFac() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerCovFac";
+    const std::string modelName = "test_model";
+    constexpr int nCluster = 3;
+    constexpr double tol = 1e-5;
+
+    for (const bool nebOn : { true, false })
+    {
+        std::filesystem::remove_all(outDir);
+        std::filesystem::create_directories(outDir);
+        toml::table inputDeck = makeClusterPhysicsInputDeck(
+            modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+        if (nebOn)
+        {
+            inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+            inputDeck.at_path("nebular").as_table()->insert_or_assign(
+                "table", std::string("tests/nebular/assets/nebular_test.h5"));
+            inputDeck.at_path("nebular").as_table()->insert_or_assign(
+                "cov_fac", std::string("tests/nebular/assets/covFacUniform.toml"));
+        }
+        const std::string label = nebOn ? "nebular on" : "nebular off";
+
+        try
+        {
+            const io::SimControls controls(inputDeck);
+            if ((controls.nebular() != nullptr) != nebOn)
+            {
+                std::cerr << "testOutputManager: covFac (" << label << "): test bug: "
+                    "unexpected SimControls::nebular() null-ness\n";
+                return 1;
+            }
+
+            utils::rng().seed(42);
+            std::vector<double> covFacs;
+            {
+                io::OutputManagerAscii asciiManager(controls);
+                io::OutputManagerH5 h5Manager(controls);
+                for (int i = 0; i < nCluster; ++i)
+                {
+                    const core::Cluster cluster(static_cast<unsigned long>(i), 1e3, 0.0, controls);
+                    covFacs.push_back(cluster.covFac());
+                    asciiManager.writeCluster(0, cluster);
+                    h5Manager.writeCluster(0, cluster);
+                }
+            }
+
+            // ascii: the header names a cov_fac column iff nebular is
+            // on, and each row's cov_fac field (right after a_v and
+            // a_v_neb) matches its cluster's covFac()
+            {
+                std::ifstream file(outDir / (modelName + "_clusters.txt"));
+                std::string headerLine;
+                std::string unitsLine;
+                std::string ruleLine;
+                std::getline(file, headerLine);
+                std::getline(file, unitsLine);
+                std::getline(file, ruleLine);
+                if (headerLine.contains("cov_fac") != nebOn)
+                {
+                    std::cerr << "testOutputManager: covFac (" << label << "): clusters.txt "
+                        "header " << (nebOn ? "is missing" : "unexpectedly has")
+                        << " a cov_fac column\n";
+                    return 1;
+                }
+                // Column layout: trial, uid, target_mass, birth_mass,
+                // form_time, feh, a_v, a_v_neb, cov_fac, rng. Index
+                // from the start, not the end: a serialized rng state
+                // can itself contain spaces.
+                constexpr std::size_t covFacCol = 8;
+                std::istringstream headerStream(headerLine);
+                std::istringstream unitsStream(unitsLine);
+                std::vector<std::string> names;
+                std::vector<std::string> units;
+                for (std::string word; headerStream >> word;) { names.push_back(word); }
+                for (std::string word; unitsStream >> word;) { units.push_back(word); }
+                if (nebOn && (names.size() != units.size() || names.size() != covFacCol + 2 ||
+                    names.at(covFacCol) != "cov_fac" || names.at(covFacCol - 1) != "a_v_neb" ||
+                    names.at(covFacCol + 1) != "rng" || units.at(covFacCol) != "none"))
+                {
+                    std::cerr << "testOutputManager: covFac (" << label << "): clusters.txt "
+                        "expected cov_fac (units none) right after a_v_neb and before rng\n";
+                    return 1;
+                }
+                const std::size_t expectedRuleWidth = ruleLine.size();
+                if (headerLine.size() != expectedRuleWidth)
+                {
+                    std::cerr << "testOutputManager: covFac (" << label << "): clusters.txt "
+                        "header width " << headerLine.size() << " does not match rule width "
+                        << expectedRuleWidth << "\n";
+                    return 1;
+                }
+                if (nebOn)
+                {
+                    std::string dataLine;
+                    for (int i = 0; i < nCluster; ++i)
+                    {
+                        std::getline(file, dataLine);
+                        std::istringstream lineStream(dataLine);
+                        std::vector<std::string> fields;
+                        for (std::string word; lineStream >> word;) { fields.push_back(word); }
+                        const double readCovFac = std::stod(fields.at(covFacCol));
+                        if (std::abs(readCovFac - covFacs.at(i)) > tol * covFacs.at(i))
+                        {
+                            std::cerr << "testOutputManager: covFac (" << label << "): "
+                                "clusters.txt row " << i << " cov_fac = " << readCovFac
+                                << " does not match cluster.covFac() = " << covFacs.at(i) << "\n";
+                            return 1;
+                        }
+                    }
+                }
+            }
+
+            // H5: a cov_fac dataset iff nebular is on, matching every
+            // cluster's covFac() exactly, with an empty units attribute
+            // NOLINTBEGIN(misc-include-cleaner)
+            const auto h5Path = outDir / (modelName + ".h5");
+            const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (file < 0)
+            {
+                std::cerr << "testOutputManager: covFac (" << label << "): unable to reopen "
+                    << h5Path.string() << "\n";
+                return 1;
+            }
+            const hid_t clustersGrp = H5Gopen2(file, "clusters", H5P_DEFAULT);
+            const bool hasCovFac = H5Lexists(clustersGrp, "cov_fac", H5P_DEFAULT) > 0;
+            std::vector<double> readCovFacs;
+            std::string readUnits;
+            if (hasCovFac)
+            {
+                readCovFacs = readColumnDouble(clustersGrp, "cov_fac");
+                const hid_t dset = H5Dopen2(clustersGrp, "cov_fac", H5P_DEFAULT);
+                readUnits = readUnitsAttr(dset);
+                H5Dclose(dset);
+            }
+            H5Gclose(clustersGrp);
+            H5Fclose(file);
+            // NOLINTEND(misc-include-cleaner)
+            if (hasCovFac != nebOn)
+            {
+                std::cerr << "testOutputManager: covFac (" << label << "): clusters group "
+                    << (nebOn ? "is missing" : "unexpectedly has") << " a cov_fac dataset\n";
+                return 1;
+            }
+            if (nebOn && (readCovFacs != covFacs || !readUnits.empty()))
+            {
+                std::cerr << "testOutputManager: covFac (" << label << "): clusters/cov_fac "
+                    "does not match the clusters' covFac() values, or has non-empty units \""
+                    << readUnits << "\"\n";
+                return 1;
+            }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testOutputManager: covFac (" << label << ") test failed: "
+                << error.what() << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Verify that OutputManagerH5's constructor creates the galaxy,
 // galaxy_spectra, and galaxy_phot groups (and only those -- no rows
 // have been written yet) for a galaxy-type simulation with spectral
@@ -5046,6 +5217,7 @@ auto testOutputManager() -> int
     result += testWriteClusterSpecPhotH5Extinct();
     result += testWriteClusterSpecPhotH5Nebular();
     result += testWriteClusterSpecPhotH5NebLines();
+    result += testWriteClusterCovFac();
     result += testOptOutClusterSpecOutput();
     result += testGalaxyGroupsH5();
     result += testGalaxyGroupsAbsentH5();

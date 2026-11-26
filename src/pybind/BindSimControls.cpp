@@ -19,6 +19,8 @@
 #include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
+#include "../nebular/NebularCommons.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
@@ -405,6 +407,42 @@ is always finite and non-negative.
 
 Reading returns a PDF; assigning a str sets a new one via
 setAVNebFac() -- see its own docstring for the exact rules.)doc";
+
+static constexpr std::string_view setCovFacDocstring = R"doc(Set the distribution of the nebular covering factor.
+
+Parameters
+----------
+cov_fac : str
+    A numerical value (interpreted as a delta-function covering factor
+    at that value) or the name of a PDF file. See the covFac property
+    for what this factor is.
+
+Throws
+------
+RuntimeError
+    If cov_fac is not numeric and does not name a file that can be
+    found, or if the resulting distribution does not lie entirely
+    within [0, 1] (including "nan"); covFac is left unchanged in either
+    case.
+
+Details
+-------
+Takes effect for every Cluster constructed afterward, since each one
+draws its own covering factor at construction (see Cluster.covFac()),
+and immediately for Nebular.getGalaxy(), which reads this
+distribution's mean live.)doc";
+
+static constexpr std::string_view covFacPropertyDocstring = R"doc(The distribution of the nebular covering factor.
+
+The fraction of a nebula's ionizing photons that are absorbed by it
+and reprocessed into nebular emission, set by the input deck's
+optional nebular.cov_fac key; a delta function at 0.5 if that key was
+not given. Each Cluster draws its own covering factor from this
+distribution when it is constructed (if nebular emission is on), while
+Nebular.getGalaxy() uses its mean. Always lies within [0, 1].
+
+Reading returns a PDF; assigning a str sets a new one via setCovFac()
+-- see its own docstring for the exact rules.)doc";
 
 static constexpr std::string_view setSFRDocstring = R"doc(Set the star formation rate.
 
@@ -1540,6 +1578,8 @@ void bindSimControls(py::module_& m)
                 setAVDistFieldDocstring.data(), py::arg("av_dist_field"))
         .def("setAVNebFac", &io::SimControls::setAVNebFac,
                 setAVNebFacDocstring.data(), py::arg("av_neb_fac"))
+        .def("setCovFac", &io::SimControls::setCovFac,
+                setCovFacDocstring.data(), py::arg("cov_fac"))
         .def("setSFR", &io::SimControls::setSFR,
                 setSFRDocstring.data(), py::arg("sfr"))
         .def("setSFRDist", &io::SimControls::setSFRDist,
@@ -1639,6 +1679,12 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::avNebFac,
                 [](io::SimControls& self, const std::string& avNebFac) { self.setAVNebFac(avNebFac); },
                 avNebFacPropertyDocstring.data())
+        .def_property("covFac",
+                py::cpp_function(
+                    [](const io::SimControls& self) -> const pdfs::PDF& { return self.nebControls().covFac_; },
+                    py::return_value_policy::reference_internal),
+                [](io::SimControls& self, const std::string& covFac) { self.setCovFac(covFac); },
+                covFacPropertyDocstring.data())
         .def_property("sfr",
                 &io::SimControls::sfr,
                 [](io::SimControls& self, const std::string& sfr) { self.setSFR(sfr); },

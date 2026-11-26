@@ -662,10 +662,13 @@ auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double f
     static constexpr auto context = "Nebular::getGalaxy";
 
     const auto feHBracket = bracketGrid(feH_, feH, context, "[Fe/H]");
-    // covFac_ discounts Q(HI) for ionizing photons lost to dust-grain
-    // absorption or escape outside the observational aperture, before
-    // any of it is attributed to nebular emission below
-    const double qhi = simControls_.nebControls().covFac_ * qhiFilter_.phot(wl_, spec);
+    // The covering factor discounts Q(HI) for ionizing photons lost to
+    // dust-grain absorption or escape outside the observational
+    // aperture, before any of it is attributed to nebular emission
+    // below. A whole galaxy averages over many nebulae, so it uses the
+    // mean of the covering factor distribution (nebular emission is
+    // linear in the covering factor, so this is exact).
+    const double qhi = simControls_.nebControls().covFac_.expectationValue() * qhiFilter_.phot(wl_, spec);
 
     const size_t nLine = lineWl_.size();
     std::vector<double> lineLum(nLine);
@@ -692,7 +695,7 @@ auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double f
 }
 
 auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double feH,
-    const double age) const -> std::pair<std::vector<double>, std::vector<double>>
+    const double age, const double covFac) const -> std::pair<std::vector<double>, std::vector<double>>
 {
     static constexpr auto context = "Nebular::getCluster";
 
@@ -710,10 +713,10 @@ auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double 
     const double ageClamped = std::max(age, clusterAge_.front());
     const auto ageBracket = bracketGrid(clusterAge_, ageClamped, context, "cluster age");
 
-    // covFac_ discounts Q(HI) for ionizing photons lost to dust-grain
+    // covFac discounts Q(HI) for ionizing photons lost to dust-grain
     // absorption or escape outside the observational aperture, before
     // any of it is attributed to nebular emission below
-    const double qhi = simControls_.nebControls().covFac_ * qhiFilter_.phot(wl_, spec);
+    const double qhi = covFac * qhiFilter_.phot(wl_, spec);
 
     const size_t nLine = lineWl_.size();
     std::vector<double> lineLum(nLine);

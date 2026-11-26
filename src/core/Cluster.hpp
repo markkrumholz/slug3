@@ -78,10 +78,11 @@ namespace core
          *   original cluster's
          * @details
          * Sets every member the same way the primary constructor does,
-         * except for feH_, aV_, avNeb_, m_, and birthMass_: rngState_ is set to
+         * except for feH_, aV_, avNeb_, covFac_, m_, and birthMass_: rngState_ is set to
          * rngState directly, since that is this cluster's own birth
          * state by construction, rather than one captured live.
-         * feH_, aV_ and avNeb_ (if SimControls::avDist() is valid), and m_ are
+         * feH_, aV_ and avNeb_ (if SimControls::avDist() is valid),
+         * covFac_ (if SimControls::nebular() is non-null), and m_ are
          * then all drawn together, in the same order the primary
          * constructor draws them, from rngState rather than the live
          * rng stream -- saving the live state first and restoring it
@@ -169,6 +170,19 @@ namespace core
          *   not valid (no extinction requested)
          */
         [[nodiscard]] auto avNeb() const { return avNeb_; }
+
+        /**
+         * @brief Return the covering factor of the cluster's nebula
+         * @return The fraction of the cluster's ionizing photons
+         *   absorbed by its nebula, drawn from
+         *   SimControls::nebControls().covFac_ at construction and
+         *   passed to SimControls::nebular()'s own getCluster()
+         *   whenever this cluster's nebular emission is computed; or a
+         *   quiet NaN if SimControls::nebular() was null at
+         *   construction (no nebular emission is computed, so no
+         *   covering factor is drawn)
+         */
+        [[nodiscard]] auto covFac() const { return covFac_; }
 
         /**
          * @brief Return the current list of living stellar masses
@@ -560,6 +574,7 @@ namespace core
         double feH_;                /**< [Fe/H] of cluster */
         double aV_;                 /**< V-band extinction, in magnitudes, drawn from SimControls::avDist() (0 if that PDF is not valid) */
         double avNeb_;              /**< V-band extinction applied to nebular emission, in magnitudes -- see avNeb()'s own comment. Declared immediately after aV_, so that the primary constructor's initializer list draws it right after aV_ and before m_, the same order the rng-state constructor replays them in */
+        double covFac_;             /**< Nebular covering factor -- see covFac()'s own comment. Declared immediately after avNeb_, so that the primary constructor's initializer list draws it right after avNeb_ and before m_, the same order the rng-state constructor replays them in */
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this cluster was built from
@@ -752,7 +767,7 @@ namespace core
          * (stochastic) star in m_. If SimControls::nebular() is
          * non-null, then sets specNeb_/lineLum_ from spec_ via
          * SimControls::nebular()'s own getCluster(), passing this
-         * cluster's own feH_ and age (curTime_ - formTime_). If
+         * cluster's own feH_, age (curTime_ - formTime_), and covFac_. If
          * SimControls::extinct() is also non-null, sets specExtinct_
          * from spec_, and -- if a nebular emission grid was requested
          * -- specNebExtinct_ from specNeb_ via
