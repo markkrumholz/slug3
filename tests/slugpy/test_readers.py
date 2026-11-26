@@ -278,6 +278,11 @@ def test_clusters_contains(clusters):
     assert 0 not in clusters
     assert [] not in clusters  # unhashable: False, not TypeError
 
+    class UnhashableStr(str):
+        __hash__ = None  # pyright: ignore[reportAssignmentType] -- deliberately unhashable
+
+    assert UnhashableStr("birth_mass") not in clusters
+
 
 def test_clusters_unitful_dataset(clusters):
     """A dataset with a real physical unit comes back as a positive-valued Quantity."""
