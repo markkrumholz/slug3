@@ -77,10 +77,11 @@ line_wl : list of float
 static constexpr std::string_view getGalaxyDocstring = R"doc(Add whole-galaxy nebular emission to an input stellar spectrum.
 
 Q(HI) (the H-ionizing photon rate) is read off spec, then discounted
-by controls's own nebular coverage fraction (the fraction of ionizing
-photons actually absorbed by the nebula, rather than lost to dust
-grains or escaping the observational aperture); every added quantity
-scales with that discounted rate. The continuum is added everywhere;
+by the mean of controls's own nebular covering factor distribution
+(nebular.cov_fac: the fraction of ionizing photons actually absorbed
+by the nebula, rather than lost to dust grains or escaping the
+observational aperture); every added quantity scales linearly with
+that discounted rate. The continuum is added everywhere;
 the input spectrum itself is kept only above the H-ionization edge
 (shorter wavelengths are zeroed, since a real HII region reprocesses
 essentially all ionizing stellar flux); lines are deposited around
@@ -111,7 +112,9 @@ RuntimeError
 static constexpr std::string_view getClusterDocstring = R"doc(Add one cluster's own nebular emission to an input stellar spectrum.
 
 Same as getGalaxy(), but interpolated in cluster age as well as
-[Fe/H] -- except that, for age above this table's own tabulated age
+[Fe/H], and with Q(HI) discounted by the covering factor cov_fac given
+here rather than by the mean of controls's covering factor
+distribution -- except that, for age above this table's own tabulated age
 range, the returned line luminosities are all zero and the returned
 spectrum is just spec with every bin at or below the H-ionization edge
 zeroed (the same edge-zeroing getGalaxy() applies, with no continuum
@@ -126,6 +129,10 @@ feh : float
     [Fe/H] of the cluster spec was computed for.
 age : float
     Cluster age, in yr.
+cov_fac : float
+    Covering factor of this cluster's nebula (the fraction of ionizing
+    photons it absorbs), typically one drawn from controls's own
+    nebular.cov_fac distribution, as Cluster does for itself.
 
 Returns
 -------
@@ -175,6 +182,6 @@ void bindNebular(py::module_& m)
                 py::arg("spec"), py::arg("feh"))
         .def("getCluster", &nebular::Nebular::getCluster,
                 getClusterDocstring.data(),
-                py::arg("spec"), py::arg("feh"), py::arg("age"));
+                py::arg("spec"), py::arg("feh"), py::arg("age"), py::arg("cov_fac"));
 }
 // NOLINTEND(misc-include-cleaner)

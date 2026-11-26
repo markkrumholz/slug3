@@ -161,6 +161,10 @@ history and the cluster mass function. Every dataset below has shape
   extinction applied to this cluster's nebular emission: ``A_V`` times a factor
   drawn from ``extinct.neb_factor`` (see :ref:`ssec-parameters-extinct`), or equal to
   ``A_V`` if that keyword was not given.
+* ``cov_fac`` (unitless; only present if nebular emission was computed): The
+  covering factor of this cluster's nebula, drawn from ``nebular.cov_fac`` (see
+  :ref:`ssec-parameters-nebular`) -- the fraction of its ionizing photons that
+  are reprocessed into nebular emission.
 
 The ``cluster_spectra`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -518,7 +522,8 @@ One row per individually-tracked cluster -- see the ``clusters`` HDF5 group
 above for exactly which clusters that means and what each column means.
 Columns, in order: ``trial``, ``uid``, ``target_mass`` (Msun), ``birth_mass``
 (Msun), ``form_time`` (yr), ``feh``, ``a_v`` and ``a_v_neb`` (mag; only if
-``extinct.model`` was set; the HDF5 group's ``A_V`` and ``A_V_neb``), ``rng``.
+``extinct.model`` was set; the HDF5 group's ``A_V`` and ``A_V_neb``), ``cov_fac``
+(only if nebular emission was computed), ``rng``.
 
 The ``<model_name>_cluster_spectra.txt`` File
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

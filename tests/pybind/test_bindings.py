@@ -916,6 +916,22 @@ def test_simcontrols_av_neb_fac_default_and_setters():
         controls.setAVNebFac("not_numeric_or_a_real_file")
 
 
+def test_simcontrols_cov_fac_default_and_setters():
+    """covFac defaults to a delta at 0.5; assigning the property and
+    calling setCovFac() both replace it; a value outside [0, 1] raises
+    and leaves the old value in place."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.covFac.getMin() == controls.covFac.getMax() == pytest.approx(0.5)
+    controls.covFac = "0.25"
+    assert controls.covFac.draw() == pytest.approx(0.25)
+    controls.setCovFac("0.75")
+    assert controls.covFac.draw() == pytest.approx(0.75)
+    for bad in ("-0.1", "1.5", "nan", "not_numeric_or_a_real_file"):
+        with pytest.raises(RuntimeError):
+            controls.setCovFac(bad)
+        assert controls.covFac.draw() == pytest.approx(0.75)
+
+
 def test_simcontrols_av_neb_fac_from_deck():
     """extinct.neb_factor in the input deck sets avNebFac."""
     deck = tomllib.loads(pathlib.Path(CLUSTER_DECK).read_text())

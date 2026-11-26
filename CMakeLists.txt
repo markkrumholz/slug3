@@ -279,12 +279,21 @@ add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/nebular/Nebular.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterTabulated.cpp
     src/phot/FilterIdeal.cpp
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynBlackbody.cpp
     tests/extinct/testExtinctAll.cpp
     src/utils/HDF5Utils.cpp
+    src/utils/ParseUtils.cpp
 )
 add_executable(slugTestPhot
     src/phot/FilterCollection.cpp

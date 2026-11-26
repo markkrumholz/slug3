@@ -1193,6 +1193,40 @@ void io::SimControls::setAVNebFac(const std::string& avNebFac)
     }
 }
 
+// Throw unless covFac (a candidate for NebularControls::covFac_) has
+// support entirely within [0, 1] -- it is the fraction of ionizing
+// photons absorbed by the nebula. Written as !(lo >= 0) / !(hi <= 1)
+// so that a NaN, for which every comparison is false, is rejected too.
+static void checkCovFac(const pdfs::PDF& covFac, const std::string& source)
+{
+    const double lo = covFac.getMin();
+    const double hi = covFac.getMax();
+    if (!(lo >= 0.0) || !(hi <= 1.0)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN limit
+    {
+        throw std::runtime_error("SimControls: " + source + " must lie within [0, 1] "
+            "(it is the fraction of ionizing photons absorbed by the nebula), but it spans [" +
+            std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    }
+}
+
+// Set the nebular control parameters, validating covFac_ first and
+// preserving computeNeb_ -- see setNebControls()'s own header comment
+void io::SimControls::setNebControls(nebular::NebularControls nebControls)
+{
+    checkCovFac(nebControls.covFac_, "the nebular covering factor");
+    nebControls.computeNeb_ = nebControls_.computeNeb_;
+    nebControls_ = std::move(nebControls);
+}
+
+// Set the nebular covering factor distribution, validating it before
+// replacing the old one -- see setCovFac()'s own header comment
+void io::SimControls::setCovFac(const std::string& covFac)
+{
+    auto newCovFac = utils::initPDFFromString(covFac);
+    checkCovFac(newCovFac, "the nebular covering factor");
+    nebControls_.covFac_ = std::move(newCovFac);
+}
+
 // Extinction curve reader
 void io::SimControls::readExtinct(const utils::TrackedDeck& inputDeck)
 {
@@ -1609,8 +1643,16 @@ void io::SimControls::readNebular(const utils::TrackedDeck& inputDeck)
     const auto logU = inputDeck.value<double>("nebular.log_U");
     if (logU) { nebControls_.logU_ = logU.value(); }
 
-    const auto covFac = inputDeck.value<double>("nebular.cov_fac");
-    if (covFac) { nebControls_.covFac_ = covFac.value(); }
+    // nebular.cov_fac: a PDF-valued key (a single number is a delta
+    // distribution at that value, as for every other PDF-valued key);
+    // each cluster draws its own covering factor from it -- see
+    // core::Cluster::covFac()
+    if (inputDeck.atPath("nebular.cov_fac"))
+    {
+        auto covFac = inputDeck.initPDF("nebular.cov_fac");
+        checkCovFac(covFac, "nebular.cov_fac");
+        nebControls_.covFac_ = std::move(covFac);
+    }
 
     const auto lineWidth = inputDeck.value<double>("nebular.line_width");
     if (lineWidth) { nebControls_.lineWidth_ = lineWidth.value(); }

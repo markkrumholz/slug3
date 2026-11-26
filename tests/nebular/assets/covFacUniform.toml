@@ -1,0 +1,11 @@
+# A nebular covering factor distribution (uniform between 0.2 and 0.8)
+# used by the SimControls, Cluster, Nebular, and OutputManager tests to
+# exercise a non-delta nebular.cov_fac. Its expectation value is 0.5,
+# equal to nebular::defaultCovFac.
+
+format = "basic"
+breakpoints = [0.2, 0.8]
+
+[segment1]
+type = "powerlaw"
+slope = 0

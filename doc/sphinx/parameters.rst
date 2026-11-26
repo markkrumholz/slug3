@@ -379,7 +379,12 @@ to its own default if omitted.
 * ``log_U`` (optional, default=-2.5): The base-10 logarithm of the ionization parameter.
 * ``cov_fac`` (optional, default=0.5): The nebular covering factor (the fraction of
   ionizing photons that actually ionize gas within the covering material, as
-  opposed to escaping).
+  opposed to escaping), as a number or PDF (see above); its support must lie
+  within [0, 1], or slug reports an error. Each individually-tracked cluster
+  draws its own covering factor from this distribution when it forms, while
+  the nebular emission of a galaxy's continuous ("field") stellar population
+  uses the distribution's mean. A plain number gives every cluster that same
+  covering factor.
 * ``line_width`` (optional, default=20.0): The assumed width of nebular emission
   lines, in km/s.
 * ``table`` (optional, default=``data/nebular/nebular.h5``): Overrides the default

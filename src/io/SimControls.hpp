@@ -860,7 +860,8 @@ namespace io
          * @brief List every PDF this SimControls holds, by name
          * @return One (name, PDF) pair per PDF-valued setting, named by
          *   its own accessor -- imf, cmf, fehDist, sfr, sfrDist, clf,
-         *   avDist, avDistField, avNebFac, outTimeDist -- including
+         *   avDist, avDistField, avNebFac, covFac (nebControls().covFac_),
+         *   outTimeDist -- including
          *   ones that are invalid/unused for this simulation (check
          *   PDF::valid() before using them)
          * @details
@@ -882,6 +883,7 @@ namespace io
                 {"avDist", &avDist_},
                 {"avDistField", &avDistField_},
                 {"avNebFac", &avNebFac_},
+                {"covFac", &nebControls_.covFac_},
                 {"outTimeDist", &outTimeDist_},
             };
         }
@@ -1370,12 +1372,20 @@ namespace io
 
         /**
          * @brief Set the nebular emission control parameters
-         * @param nebControls New control parameters; see nebControls()'s own comment
+         * @param nebControls New control parameters; see nebControls()'s
+         *   own comment. Taken by value and moved from, since
+         *   NebularControls holds a (move-only) pdfs::PDF.
+         * @throws std::runtime_error if nebControls.covFac_'s support
+         *   does not lie within [0, 1] (the same check setCovFac() and
+         *   the nebular.cov_fac key apply); nebControls() is left
+         *   unchanged in that case
          * @details
          * Like setFCluster(), a plain direct assignment for
          * logU_/covFac_/lineWidth_ -- all three are read live, so
          * updating them here takes effect the next time
-         * Nebular::getCluster()/getGalaxy() runs, with no need to
+         * Nebular::getCluster()/getGalaxy() runs (for covFac_, the
+         * next time a Cluster is constructed, since each cluster draws
+         * its own covering factor at birth), with no need to
          * rebuild anything. computeNeb_ is deliberately excluded from
          * that assignment and left at whatever this SimControls was
          * actually constructed with: unlike the other three fields,
@@ -1390,12 +1400,24 @@ namespace io
          * nebular products from it, since they gate on nebular() being
          * non-null, not on this flag).
          */
-        void setNebControls(const nebular::NebularControls& nebControls)
-        {
-            auto updated = nebControls;
-            updated.computeNeb_ = nebControls_.computeNeb_;
-            nebControls_ = updated;
-        }
+        void setNebControls(nebular::NebularControls nebControls);
+
+        /**
+         * @brief Set the distribution of the nebular covering factor
+         * @param covFac Either a number (interpreted as a delta
+         *   function at that value) or the name of a PDF file
+         * @throws std::runtime_error if covFac is not numeric and does
+         *   not name a file that can be parsed as a PDF descriptor, or
+         *   if the resulting PDF's support does not lie within [0, 1];
+         *   nebControls().covFac_ is left unchanged in either case
+         * @details
+         * Like the nebular.cov_fac input-deck key. Takes effect for
+         * every Cluster constructed afterward (each one draws its own
+         * covering factor at birth -- see core::Cluster::covFac()),
+         * and immediately for Nebular::getGalaxy(), which reads
+         * nebControls().covFac_'s expectation value live.
+         */
+        void setCovFac(const std::string& covFac);
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from
@@ -2108,8 +2130,12 @@ namespace io
          * @details
          * Reads nebular.log_U, nebular.cov_fac, and nebular.line_width
          * into nebControls_, each left at its own nebular::defaultXxx value
-         * (already NebularControls's own default member initializers)
-         * if its key was not given -- so, unlike readSpectra()'s or
+         * (already NebularControls's own default member initializers;
+         * for cov_fac, a delta distribution at nebular::defaultCovFac)
+         * if its key was not given. nebular.cov_fac is PDF-valued, read
+         * via the standard PDF-valued key pathway (a number is a delta
+         * distribution, a string names a PDF file), and must have
+         * support within [0, 1], or std::runtime_error is thrown -- so, unlike readSpectra()'s or
          * readExtinct()'s own all-or-nothing stanzas, every key here
          * is independently optional. Also reads nebular.table (falling
          * back to nebular::defaultTable), and stars.tracks/

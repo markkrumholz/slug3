@@ -11,6 +11,7 @@
 
 #include "../src/io/SimControls.hpp"
 #include "../src/nebular/Nebular.hpp"
+#include "../src/nebular/NebularCommons.hpp"
 #include "../src/phot/FilterIdeal.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include <cmath>
@@ -188,7 +189,7 @@ inline auto testNebularGetGalaxy() -> int
 
         const std::vector<double> spec(wl.size(), 1.0);
         const phot::FilterIdeal qhiFilter("Q(HI)");
-        const double covFac = controls.nebControls().covFac_;
+        const double covFac = controls.nebControls().covFac_.expectationValue();
         const double qhi = covFac * qhiFilter.phot(wl, spec);
         if (!(qhi > 0.0))
         {
@@ -279,6 +280,65 @@ inline auto testNebularGetGalaxy() -> int
 }
 
 /**
+ * @brief Unit test: Nebular::getGalaxy() uses the expectation value of the covering factor distribution
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * Changes the covering factor via SimControls::setCovFac() after the
+ * Nebular is built, first to a delta distribution at 0.3 -- which
+ * must scale every line luminosity by 0.3 / defaultCovFac, confirming
+ * the distribution is read live -- and then to a uniform distribution
+ * on [0.2, 0.8] (tests/nebular/assets/covFacUniform.toml), whose mean
+ * is exactly defaultCovFac, so the line luminosities must return to
+ * their default-covering-factor values (a single random draw from
+ * that distribution would almost surely not).
+ */
+inline auto testNebularGetGalaxyCovFacDist() -> int
+{
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(testNebularInputFile);
+        io::SimControls controls(inputDeck);
+        const auto neb = controls.nebular();
+        const auto& wl = controls.specsyn()->wl();
+        const std::vector<double> spec(wl.size(), 1.0);
+        constexpr double feh = 0.0;
+
+        const auto [specDefault, lineDefault] = neb->getGalaxy(spec, feh);
+
+        constexpr double covFacDelta = 0.3;
+        controls.setCovFac("0.3");
+        const auto [specDelta, lineDelta] = neb->getGalaxy(spec, feh);
+
+        controls.setCovFac("tests/nebular/assets/covFacUniform.toml");
+        const auto [specUniform, lineUniform] = neb->getGalaxy(spec, feh);
+
+        for (std::size_t ell = 0; ell < lineDefault.size(); ++ell)
+        {
+            const double expectedDelta = lineDefault.at(ell) * covFacDelta / nebular::defaultCovFac;
+            if (!utils::approxEqual(lineDelta.at(ell), expectedDelta, 1e-10))
+            {
+                std::cerr << "testNebular: getGalaxyCovFacDist: with cov_fac = 0.3, lineLum()["
+                    << ell << "] = " << lineDelta.at(ell) << ", expected " << expectedDelta << "\n";
+                return 1;
+            }
+            if (!utils::approxEqual(lineUniform.at(ell), lineDefault.at(ell), 1e-10))
+            {
+                std::cerr << "testNebular: getGalaxyCovFacDist: with cov_fac uniform on "
+                    "[0.2, 0.8], lineLum()[" << ell << "] = " << lineUniform.at(ell)
+                    << ", expected the default-covering-factor value " << lineDefault.at(ell) << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testNebular: getGalaxyCovFacDist test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+/**
  * @brief Unit test: Nebular::getCluster() at an exact [Fe/H]/age grid hit
  * @returns 0 if the test passes, 1 if it fails
  * @details
@@ -300,11 +360,15 @@ inline auto testNebularGetClusterExactHit() -> int
 
         const std::vector<double> spec(wl.size(), 1.0);
         const phot::FilterIdeal qhiFilter("Q(HI)");
-        const double qhi = controls.nebControls().covFac_ * qhiFilter.phot(wl, spec);
+        // A covering factor deliberately different from the deck's own
+        // (default) one, so this also checks that getCluster() uses
+        // its covFac argument rather than nebControls().covFac_
+        constexpr double covFac = 0.3;
+        const double qhi = covFac * qhiFilter.phot(wl, spec);
 
         constexpr double feh = 0.0;
         constexpr double age = 1.0e7;
-        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, age);
+        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, age, covFac);
         if (outSpec.size() != wl.size())
         {
             std::cerr << "testNebular: getClusterExactHit: output spectrum size "
@@ -357,11 +421,14 @@ inline auto testNebularGetClusterOffGrid() -> int
 
         const std::vector<double> spec(wl.size(), 1.0);
         const phot::FilterIdeal qhiFilter("Q(HI)");
-        const double qhi = controls.nebControls().covFac_ * qhiFilter.phot(wl, spec);
+        // Not the deck's own (default) covering factor -- see
+        // testNebularGetClusterExactHit()
+        constexpr double covFac = 0.7;
+        const double qhi = covFac * qhiFilter.phot(wl, spec);
 
         constexpr double feh = 0.25;
         constexpr double age = 5.0e6;
-        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, age);
+        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, age, covFac);
         for (std::size_t ell = 0; ell < testNebularNLine; ++ell)
         {
             const double expected = qhi * testNebularLineClus0 *
@@ -435,7 +502,8 @@ inline auto testNebularGetClusterAboveAgeRange() -> int
 
         constexpr double feh = 0.0;
         constexpr double veryOldAge = 1.0e9;
-        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, veryOldAge);
+        const auto [outSpec, lineLum] = neb->getCluster(spec, feh, veryOldAge,
+            nebular::defaultCovFac);
         for (const double lum : lineLum)
         {
             if (lum != 0.0)
@@ -490,6 +558,7 @@ inline auto testNebular() -> int
     result += testNebularNoSpecsynThrows();
     result += testNebularLineLabelWl();
     result += testNebularGetGalaxy();
+    result += testNebularGetGalaxyCovFacDist();
     result += testNebularGetCluster();
     return result;
 }

@@ -145,11 +145,14 @@ namespace nebular
          * @throws std::runtime_error if feH falls outside feH_'s own tabulated range
          * @details
          * Q(HI) (the H-ionizing photon rate) is read off spec via
-         * qhiFilter_, then discounted by simControls_.nebControls().
-         * covFac_ (the fraction of ionizing photons actually absorbed
-         * by the nebula, rather than lost to dust grains or escaping
-         * the observational aperture); every quantity added below
-         * scales with that discounted rate.
+         * qhiFilter_, then discounted by the expectation value of
+         * simControls_.nebControls().covFac_ (the distribution of the
+         * fraction of ionizing photons actually absorbed by the nebula,
+         * rather than lost to dust grains or escaping the observational
+         * aperture); every quantity added below scales linearly with
+         * that discounted rate, so using the mean covering factor gives
+         * the expected emission of a population of nebulae whose
+         * covering factors follow that distribution.
          * Every per-[Fe/H] quantity (lineLumPerQGalaxy_,
          * ctmLumPerQGalaxy_) is linearly interpolated between the two
          * tabulated [Fe/H] values bracketing feH. The continuum is
@@ -168,6 +171,12 @@ namespace nebular
          *   wl_ grid, in erg/s/Angstrom
          * @param feH [Fe/H] of the cluster spec was computed for
          * @param age Cluster age, in yr
+         * @param covFac Covering factor of this cluster's nebula (the
+         *   fraction of ionizing photons it absorbs), used to discount
+         *   Q(HI) in place of getGalaxy()'s expectation value of
+         *   simControls_.nebControls().covFac_ -- typically the
+         *   cluster's own core::Cluster::covFac(), drawn from that
+         *   distribution at the cluster's birth
          * @return Same as getGalaxy(), but interpolated in cluster
          *   age as well as [Fe/H] -- except that, for age above
          *   clusterAge_'s own tabulated range (this table has no data
@@ -182,7 +191,8 @@ namespace nebular
          *   above its own maximum takes the early-return path
          *   described above)
          */
-        [[nodiscard]] auto getCluster(const std::vector<double>& spec, double feH, double age) const
+        [[nodiscard]] auto getCluster(const std::vector<double>& spec, double feH, double age,
+            double covFac) const
             -> std::pair<std::vector<double>, std::vector<double>>;
 
     private:

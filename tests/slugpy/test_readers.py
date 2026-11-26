@@ -271,6 +271,19 @@ def test_clusters_keys(clusters):
     assert set(clusters.keys()) == expected
 
 
+def test_clusters_contains(clusters):
+    """``in`` reports exactly the datasets keys() lists, read from disk or not."""
+    assert "birth_mass" in clusters
+    assert "cov_fac" not in clusters
+    assert 0 not in clusters
+    assert [] not in clusters  # unhashable: False, not TypeError
+
+    class UnhashableStr(str):
+        __hash__ = None  # pyright: ignore[reportAssignmentType] -- deliberately unhashable
+
+    assert UnhashableStr("birth_mass") not in clusters
+
+
 def test_clusters_unitful_dataset(clusters):
     """A dataset with a real physical unit comes back as a positive-valued Quantity."""
     masses = clusters["target_mass"]

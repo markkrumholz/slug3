@@ -10,6 +10,8 @@
 #include "../src/feedback/Winds.hpp"
 #include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
+#include "../src/nebular/Nebular.hpp"
+#include "../src/nebular/NebularCommons.hpp"
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/tracks/TrackCommons.hpp"
 #include "../src/utils/Constants.hpp"
@@ -29,7 +31,9 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <toml.hpp>
@@ -836,6 +840,183 @@ static auto testClusterNebularExtinctFactor() -> int
     return 0;
 }
 
+// Verify Cluster's nebular covering factor (Cluster::covFac(), drawn
+// from SimControls::nebControls().covFac_): a quiet NaN when nebular
+// emission is off; exactly nebular::defaultCovFac by default; with a
+// non-delta nebular.cov_fac (uniform on [0.2, 0.8]), a draw within that
+// distribution's support, varying from cluster to cluster, replayed
+// exactly by the rng-state constructor, and actually used (rather than
+// the distribution's mean) when computing lineLum()/specNeb().
+static auto testClusterCovFac() -> int
+{
+    constexpr double ageYr = 1e7; // an exact hit on the nebular fixture's own tabulated cluster ages
+    constexpr double covFacLo = 0.2; // support of covFacUniform.toml
+    constexpr double covFacHi = 0.8;
+
+    try
+    {
+        // Nebular emission off (testClusterExtinct.in sets compute_neb =
+        // false): covFac() is NaN. Installing a grid afterward must make
+        // nebular quantities throw rather than come out NaN.
+        {
+            io::SimControls controls(toml::parse_file(inputFileExtinct));
+            utils::rng().seed(rngSeed);
+            core::Cluster cluster(0, 1e3, 0.0, controls);
+            if (!std::isnan(cluster.covFac()))
+            {
+                std::cerr << "testCluster: covFac: expected covFac() to be NaN with "
+                    "nebular emission off, got " << cluster.covFac() << "\n";
+                return 1;
+            }
+            // Compute (and cache) the spectra before the grid exists,
+            // so the first round of checks below hits the cached path;
+            // the second, after another advance(), the uncached one
+            cluster.advance(ageYr);
+            const auto specBefore = cluster.spec();
+            (void)cluster.phot(); // caches photometry too, so photNeb()/photNebExtinct() hit the cached path
+            controls.setNebular(std::make_unique<nebular::Nebular>(
+                "tests/nebular/assets/nebular_test.h5", "MIST_test", controls));
+            const auto nebularAccessorsAllThrow = [&cluster]() -> bool
+            {
+                const std::array<std::function<void()>, 6> accessors{
+                    [&cluster]() -> void { (void)cluster.specNeb(); },
+                    [&cluster]() -> void { (void)cluster.specNebExtinct(); },
+                    [&cluster]() -> void { (void)cluster.lineLum(); },
+                    [&cluster]() -> void { (void)cluster.lineLumExtinct(); },
+                    [&cluster]() -> void { (void)cluster.photNeb(); },
+                    [&cluster]() -> void { (void)cluster.photNebExtinct(); } };
+                for (const auto& accessor : accessors)
+                {
+                    bool threw = false;
+                    try { accessor(); }
+                    catch (const std::runtime_error&) { threw = true; }
+                    if (!threw) { return false; }
+                }
+                return true;
+            };
+            for (const bool cached : { true, false })
+            {
+                if (!cached) { cluster.advance(2.0 * ageYr); }
+                if (!nebularAccessorsAllThrow())
+                {
+                    std::cerr << "testCluster: covFac: expected every nebular accessor to "
+                        "throw for a cluster built before a nebular grid was installed ("
+                        << (cached ? "cached" : "uncached") << " spectra)\n";
+                    return 1;
+                }
+                if (cluster.spec().empty() || cluster.phot().empty() ||
+                    (cached && cluster.spec() != specBefore))
+                {
+                    std::cerr << "testCluster: covFac: expected the stellar spec()/phot() "
+                        "to stay usable (" << (cached ? "cached" : "uncached") << ")\n";
+                    return 1;
+                }
+            }
+        }
+
+        toml::table inputDeck = toml::parse_file(inputFileExtinct);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+        // An rng state recorded with nebular emission off (no
+        // covering-factor draw, standing in for a file written before
+        // covering factors were drawn per cluster, when cov_fac could
+        // only be a number) replays exactly into nebular-on controls
+        // with a delta covering factor: drawing from a delta consumes
+        // no rng state, so the draw sequence is unchanged
+        {
+            const io::SimControls controlsOff(toml::parse_file(inputFileExtinct));
+            const io::SimControls controlsOn(inputDeck);
+            utils::rng().seed(rngSeed);
+            const core::Cluster original(2, 1e4, 0.0, controlsOff);
+            const core::Cluster replayed(2, 1e4, 0.0, controlsOn, original.rngState());
+            if (replayed.starMasses() != original.starMasses() ||
+                replayed.birthMass() != original.birthMass() ||
+                replayed.covFac() != nebular::defaultCovFac)
+            {
+                std::cerr << "testCluster: covFac: expected an rng state recorded with "
+                    "nebular off to replay exactly into nebular-on controls, with covFac() = "
+                    << nebular::defaultCovFac << ", got covFac() = " << replayed.covFac() << "\n";
+                return 1;
+            }
+        }
+
+        // Default: a delta distribution at nebular::defaultCovFac
+        {
+            const io::SimControls controls(inputDeck);
+            utils::rng().seed(rngSeed);
+            const core::Cluster cluster(0, 1e3, 0.0, controls);
+            if (cluster.covFac() != nebular::defaultCovFac)
+            {
+                std::cerr << "testCluster: covFac: expected the default covFac() to be "
+                    << nebular::defaultCovFac << ", got " << cluster.covFac() << "\n";
+                return 1;
+            }
+        }
+
+        // A genuine distribution
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "cov_fac", std::string("tests/nebular/assets/covFacUniform.toml"));
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(rngSeed);
+        constexpr int nCluster = 20;
+        std::vector<double> covFacs;
+        for (int i = 0; i < nCluster; ++i)
+        {
+            const core::Cluster cluster(static_cast<unsigned long>(i), 1e3, 0.0, controls);
+            covFacs.push_back(cluster.covFac());
+        }
+        const auto [minIt, maxIt] = std::ranges::minmax_element(covFacs);
+        if (*minIt < covFacLo || *maxIt > covFacHi || *minIt == *maxIt)
+        {
+            std::cerr << "testCluster: covFac: expected distinct covFac() draws within ["
+                << covFacLo << ", " << covFacHi << "], got min " << *minIt
+                << ", max " << *maxIt << "\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed + 1);
+        core::Cluster original(1, 1e4, 0.0, controls);
+        const core::Cluster replayed(1, 1e4, 0.0, controls, original.rngState());
+        if (original.covFac() != replayed.covFac() ||
+            original.starMasses() != replayed.starMasses() ||
+            original.aV() != replayed.aV())
+        {
+            std::cerr << "testCluster: covFac: expected the rng-state constructor to "
+                "replay covFac() (" << original.covFac() << " vs " << replayed.covFac()
+                << "), aV(), and the stellar masses exactly\n";
+            return 1;
+        }
+
+        original.advance(ageYr);
+        const auto& spec = original.spec();
+        const auto [expectedSpecNeb, expectedLineLum] =
+            controls.nebular()->getCluster(spec, original.feH(), ageYr, original.covFac());
+        const auto [meanSpecNeb, meanLineLum] = controls.nebular()->getCluster(
+            spec, original.feH(), ageYr, controls.nebControls().covFac_.expectationValue());
+        if (original.specNeb() != expectedSpecNeb || original.lineLum() != expectedLineLum)
+        {
+            std::cerr << "testCluster: covFac: specNeb()/lineLum() do not match "
+                "getCluster() evaluated at the cluster's own covFac()\n";
+            return 1;
+        }
+        if (original.lineLum() == meanLineLum)
+        {
+            std::cerr << "testCluster: covFac: expected lineLum() to differ from "
+                "getCluster() evaluated at the mean covering factor\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: covFac test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Cluster's own specNeb()/specNebExtinct()/lineLum()/
 // lineLumExtinct()/photNeb()/photNebExtinct() agree, bit-for-bit, with an independent
 // recomputation via SimControls::nebular()'s own public getCluster(),
@@ -876,7 +1057,7 @@ static auto testClusterNebular() -> int
         // itself does internally (spec_ before specNeb_/specNebExtinct_)
         const auto& spec = cluster.spec();
         const auto [expectedSpecNeb, expectedLineLum] =
-            controls.nebular()->getCluster(spec, cluster.feH(), ageYr);
+            controls.nebular()->getCluster(spec, cluster.feH(), ageYr, cluster.covFac());
 
         if (cluster.specNeb() != expectedSpecNeb)
         {
@@ -2222,6 +2403,7 @@ auto testCluster() -> int
     result += testClusterLbol();
     result += testClusterLbolContinuousMatchesStochastic();
     result += testClusterNebular();
+    result += testClusterCovFac();
     result += testClusterExtinctLines();
     result += testClusterYieldsStochastic();
     result += testClusterYieldsNonStochastic();

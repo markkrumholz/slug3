@@ -165,3 +165,27 @@ class slug_group_reader:
             has been read from disk yet.
         """
         return self._datasets.keys()
+
+    def __contains__(self, key: object) -> bool:
+        """
+        Return whether this group has a dataset with the given name.
+
+        Parameters
+        ----------
+        key : object
+            Name of the dataset to look for.
+
+        Returns
+        -------
+        bool
+            True if key is one of keys(), whether or not that dataset
+            has been read from disk yet; False otherwise, including for
+            any key that is not a str (dataset names always are) or is
+            unhashable, rather than raising TypeError.
+        """
+        if not isinstance(key, str):
+            return False
+        try:
+            return key in self._datasets
+        except TypeError:  # an unhashable str subclass
+            return False

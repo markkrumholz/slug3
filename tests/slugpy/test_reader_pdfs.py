@@ -91,9 +91,9 @@ def _same_pdf(a: PDF, b: PDF) -> bool:
 
 def test_pdfs_keys(run: slug_reader) -> None:
     """The run's valid PDFs are all present, under their accessor names."""
-    assert {"imf", "cmf", "fehDist", "avNebFac"} <= set(run.pdfs)
+    assert {"imf", "cmf", "fehDist", "avNebFac", "covFac"} <= set(run.pdfs)
     assert set(run.pdfs) <= {"imf", "cmf", "fehDist", "sfr", "sfrDist", "clf",
-        "avDist", "avDistField", "avNebFac", "outTimeDist"}
+        "avDist", "avDistField", "avNebFac", "covFac", "outTimeDist"}
     assert all(isinstance(p, PDF) for p in run.pdfs.values())
 
 

@@ -29,14 +29,21 @@ a real caller would use it either way.
 """
 
 import gc
+import math
 import pathlib
 
+import h5py
+import numpy as np
 import pytest
-from slugpy._slug import FilterIdeal, Nebular, SimControls
+from slugpy._slug import Cluster, FilterIdeal, Nebular, SimControls
+
+from slugpy import run_sim
+from slugpy.slug_reader import slug_reader
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
 NEBULAR_DECK = str(REPO_ROOT / "tests" / "nebular" / "assets" / "testNebular.in")
+COV_FAC_UNIFORM = str(REPO_ROOT / "tests" / "nebular" / "assets" / "covFacUniform.toml")  # uniform on [0.2, 0.8]
 NEBULAR_TABLE = "tests/nebular/assets/nebular_test.h5"
 TRACK_NAME = "MIST_test"
 
@@ -52,11 +59,11 @@ LINE_HALF_WIDTH = 200.0
 DEFAULT_COV_FAC = 0.5  # nebular::defaultCovFac; testNebular.in doesn't override it
 
 
-def _qhi(controls, spec):
-    """Q(HI), discounted by the default covering factor -- mirrors testNebular.hpp's own independent cross-check."""
+def _qhi(controls: SimControls, spec: list[float], cov_fac: float = DEFAULT_COV_FAC) -> float:
+    """Q(HI), discounted by cov_fac (default: the deck's own default covering factor) -- mirrors testNebular.hpp's own independent cross-check."""
     wl = controls.specsyn.wl()
     qhi_filter = FilterIdeal("Q(HI)")
-    return DEFAULT_COV_FAC * qhi_filter.phot(wl, spec)
+    return cov_fac * qhi_filter.phot(wl, spec)
 
 
 def _edge_wl():
@@ -213,10 +220,13 @@ def test_get_cluster_exact_grid_hit(nebular_controls):
     neb = nebular_controls.nebular
     wl = nebular_controls.specsyn.wl()
     spec = [1.0] * len(wl)
-    qhi = _qhi(nebular_controls, spec)
+    # Not the deck's own (default) covering factor, so this also checks
+    # that getCluster() uses its cov_fac argument
+    cov_fac = 0.3
+    qhi = _qhi(nebular_controls, spec, cov_fac)
 
     feh, age = 0.0, 1.0e7
-    spec_neb, line_lum = neb.getCluster(spec, feh, age)
+    spec_neb, line_lum = neb.getCluster(spec, feh, age, cov_fac)
     assert len(spec_neb) == len(wl)
 
     for ell in range(N_LINE):
@@ -229,11 +239,12 @@ def test_get_cluster_off_grid_bilinear_interpolation(nebular_controls):
     neb = nebular_controls.nebular
     wl = nebular_controls.specsyn.wl()
     spec = [1.0] * len(wl)
-    qhi = _qhi(nebular_controls, spec)
+    cov_fac = 0.7
+    qhi = _qhi(nebular_controls, spec, cov_fac)
     edge_wl = _edge_wl()
 
     feh, age = 0.25, 5.0e6
-    spec_neb, line_lum = neb.getCluster(spec, feh, age)
+    spec_neb, line_lum = neb.getCluster(spec, feh, age, cov_fac=cov_fac)
 
     for ell in range(N_LINE):
         expected = qhi * LINE_CLUS0 * (ell + 1) * (1.0 + feh) * (age / 1.0e6)
@@ -257,9 +268,114 @@ def test_get_cluster_above_age_range_falls_back(nebular_controls):
     edge_wl = _edge_wl()
 
     feh, very_old_age = 0.0, 1.0e9
-    spec_neb, line_lum = neb.getCluster(spec, feh, very_old_age)
+    spec_neb, line_lum = neb.getCluster(spec, feh, very_old_age, DEFAULT_COV_FAC)
 
     assert all(lum == 0.0 for lum in line_lum)
     for k, w in enumerate(wl):
         expected = 0.0 if w <= edge_wl else spec[k]
         assert spec_neb[k] == pytest.approx(expected, abs=1e-6)
+
+
+def _nebular_deck_with_cov_fac(cov_fac: str) -> str:
+    """testNebular.in's text, with nebular.cov_fac set to the given (TOML-literal) value."""
+    text = pathlib.Path(NEBULAR_DECK).read_text()
+    return text.replace("[nebular]\n", f"[nebular]\ncov_fac = {cov_fac}\n", 1)
+
+
+def test_simcontrols_cov_fac_from_deck_pdf_file() -> None:
+    """nebular.cov_fac naming a PDF file sets SimControls.covFac to that distribution."""
+    controls = SimControls(_nebular_deck_with_cov_fac(f'"{COV_FAC_UNIFORM}"'))
+    assert controls.covFac.getMin() == pytest.approx(0.2)
+    assert controls.covFac.getMax() == pytest.approx(0.8)
+    assert controls.covFac.expectationValue() == pytest.approx(0.5)
+
+
+def test_simcontrols_cov_fac_out_of_range_deck_raises() -> None:
+    """A nebular.cov_fac outside [0, 1] raises RuntimeError at construction."""
+    with pytest.raises(RuntimeError):
+        SimControls(_nebular_deck_with_cov_fac("1.5"))
+
+
+def test_cluster_cov_fac_nan_without_nebular() -> None:
+    """Cluster.covFac() is NaN when nebular emission is off."""
+    controls = SimControls(CLUSTER_DECK)
+    cluster = Cluster(1e3, controls=controls)
+    assert math.isnan(cluster.covFac())
+
+
+def test_cluster_cov_fac_default(nebular_controls: SimControls) -> None:
+    """Cluster.covFac() is the default 0.5 when nebular.cov_fac is not given."""
+    cluster = Cluster(1e3, controls=nebular_controls)
+    assert cluster.covFac() == 0.5
+
+
+def test_cluster_cov_fac_drawn_from_distribution() -> None:
+    """Each Cluster draws its own covFac() from SimControls.covFac, and
+    setCovFac() changes what clusters built afterward draw."""
+    controls = SimControls(_nebular_deck_with_cov_fac(f'"{COV_FAC_UNIFORM}"'))
+    draws = [Cluster(1e3, uid=i, controls=controls).covFac() for i in range(20)]
+    assert all(0.2 <= d <= 0.8 for d in draws)
+    assert len(set(draws)) > 1
+
+    controls.setCovFac("0.9")
+    assert Cluster(1e3, controls=controls).covFac() == pytest.approx(0.9)
+
+
+def _run_nebular_deck(deck_text: str, out_dir: pathlib.Path) -> slug_reader:
+    """Run deck_text (with n_trial = 4) in out_dir and return a reader on its output."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(out_dir)
+        data = run_sim("n_trial = 4\n" + deck_text, progress=False)
+    assert isinstance(data, slug_reader)
+    return data
+
+
+def test_get_cluster_replays_cov_fac(tmp_path: pathlib.Path) -> None:
+    """For a run with per-cluster covering factors, slug_reader.get_cluster()
+    reproduces each cluster's recorded cov_fac and birth mass exactly."""
+    run = _run_nebular_deck(_nebular_deck_with_cov_fac(f'"{COV_FAC_UNIFORM}"'), tmp_path)
+    clusters = run.clusters
+    assert clusters is not None
+    assert "cov_fac" in clusters
+    cov_fac = np.asarray(clusters["cov_fac"])
+    birth_mass = np.asarray(clusters["birth_mass"])
+    uids = np.asarray(clusters["uid"])
+    assert len(set(cov_fac.tolist())) > 1
+    for i, uid in enumerate(uids):
+        cluster = run.get_cluster(int(uid))
+        assert cluster.covFac() == cov_fac[i]
+        assert cluster.birthMass() == birth_mass[i]
+
+
+def test_get_cluster_legacy_file_without_cov_fac(tmp_path: pathlib.Path) -> None:
+    """A file with no cov_fac dataset (as written before covering factors
+    were drawn per cluster) whose rebuilt controls nonetheless have nebular
+    emission on -- e.g. a deck that relied on compute_neb's default --
+    still reproduces every cluster's birth mass exactly, with covFac() at
+    the default: drawing from a delta covering factor consumes no rng
+    state, so the replayed draw sequence matches the original's."""
+    off_deck = pathlib.Path(NEBULAR_DECK).read_text().replace(
+        "compute_neb = true", "compute_neb = false", 1)
+    run = _run_nebular_deck(off_deck, tmp_path)
+    clusters = run.clusters
+    assert clusters is not None
+    assert "cov_fac" not in clusters
+    birth_mass = np.asarray(clusters["birth_mass"])
+    uids = np.asarray(clusters["uid"])
+
+    # Turn nebular emission back on in the stored input deck, so the
+    # rebuilt controls have it on although the run itself did not
+    on_toml = "n_trial = 4\n" + pathlib.Path(NEBULAR_DECK).read_text()
+    for path in run._file:
+        with h5py.File(path, "r+") as f:
+            group = f["input_deck"]
+            assert isinstance(group, h5py.Group)
+            del group["toml"]
+            group.create_dataset("toml", data=on_toml)
+    patched = slug_reader(run._file[0])
+    assert patched.controls.nebular is not None
+
+    for i, uid in enumerate(uids):
+        cluster = patched.get_cluster(int(uid))
+        assert cluster.birthMass() == birth_mass[i]
+        assert cluster.covFac() == pytest.approx(DEFAULT_COV_FAC)

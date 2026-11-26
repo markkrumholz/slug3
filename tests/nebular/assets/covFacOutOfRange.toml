@@ -1,0 +1,10 @@
+# A nebular covering factor distribution (uniform between 0.5 and 1.5)
+# whose support extends above 1, used by the SimControls tests to check
+# that an out-of-range nebular.cov_fac is rejected.
+
+format = "basic"
+breakpoints = [0.5, 1.5]
+
+[segment1]
+type = "powerlaw"
+slope = 0

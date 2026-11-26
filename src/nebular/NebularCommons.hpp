@@ -9,7 +9,10 @@
 #ifndef NEBULARCOMMONS_HPP
 #define NEBULARCOMMONS_HPP
 
+#include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFSegmentDelta.hpp"
 #include <filesystem>
+#include <memory>
 #include <string>
 
 /**
@@ -19,7 +22,7 @@ namespace nebular
 {
 
     inline constexpr double defaultLogU = -2.5;      /**< Default log10 of the ionization parameter */
-    inline constexpr double defaultCovFac = 0.5;     /**< Default nebular covering factor */
+    inline constexpr double defaultCovFac = 0.5;     /**< Default nebular covering factor; NebularControls::covFac_ defaults to a delta distribution at this value */
     inline constexpr double defaultLineWidth = 20.0; /**< Default assumed emission line width, in km/s */
     inline constexpr bool defaultComputeNeb = true;  /**< Default for whether nebular emission is computed at all, when a spectral synthesizer is available to compute it for; SimControls defaults to false when none is */
 
@@ -35,12 +38,16 @@ namespace nebular
      * input deck's own [nebular] stanza (see
      * SimControls::readNebular()), each defaulting to the
      * corresponding nebular::defaultXxx constant above if its own key
-     * was not given.
+     * was not given. covFac_ is a distribution rather than a single
+     * number: each core::Cluster draws its own covering factor from
+     * it at construction (see core::Cluster::covFac()), while
+     * Nebular::getGalaxy() uses its expectation value. Because
+     * pdfs::PDF is move-only, so is this struct.
      */
     struct NebularControls
     {
         double logU_ = defaultLogU;           /**< log10 of the ionization parameter */
-        double covFac_ = defaultCovFac;       /**< Nebular covering factor */
+        pdfs::PDF covFac_ = pdfs::PDF(std::make_unique<pdfs::PDFSegmentDelta>(defaultCovFac)); /**< Distribution of the nebular covering factor (the fraction of ionizing photons absorbed by the nebula); a delta distribution at defaultCovFac unless nebular.cov_fac says otherwise. SimControls guarantees its support lies within [0, 1] */
         double lineWidth_ = defaultLineWidth; /**< Assumed width of emission lines, in km/s */
         bool computeNeb_ = defaultComputeNeb; /**< Whether nebular emission is computed at all; if false, SimControls::nebular() is left null. Requires a spectral synthesizer -- see SimControls::readNebular() */
     };
