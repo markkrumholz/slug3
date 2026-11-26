@@ -873,6 +873,7 @@ static auto testClusterCovFac() -> int
             // the second, after another advance(), the uncached one
             cluster.advance(ageYr);
             const auto specBefore = cluster.spec();
+            (void)cluster.phot(); // caches photometry too, so photNeb()/photNebExtinct() hit the cached path
             controls.setNebular(std::make_unique<nebular::Nebular>(
                 "tests/nebular/assets/nebular_test.h5", "MIST_test", controls));
             const auto nebularAccessorsAllThrow = [&cluster]() -> bool
