@@ -150,6 +150,26 @@ namespace
     }
 } // namespace
 
+// Whether this cluster's nebular emission can be computed -- see
+// hasNebularEmission()'s own header comment
+auto core::Cluster::hasNebularEmission() const -> bool
+{
+    return controls_.get().nebular() != nullptr && !std::isnan(covFac_);
+}
+
+// Throw if nebular emission is on but this cluster has no covering
+// factor -- see requireCovFacForNebular()'s own header comment
+void core::Cluster::requireCovFacForNebular() const
+{
+    if (controls_.get().nebular() != nullptr && std::isnan(covFac_))
+    {
+        throw std::runtime_error(
+            "Cluster: cannot compute nebular emission for cluster " + std::to_string(uid_) +
+            ", which has no covering factor: it was constructed before its SimControls "
+            "had a nebular emission grid. Construct the cluster after installing the grid.");
+    }
+}
+
 // Constructor
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
@@ -470,21 +490,19 @@ void core::Cluster::computeSpec()
     }
 
     // Add nebular continuum and line emission, if a nebular emission
-    // grid was requested
-    const auto neb = sc.nebular();
+    // grid was requested and this cluster has a covering factor to
+    // compute it with. A cluster built before its grid was installed
+    // has none (covFac_ is NaN); its nebular quantities are left empty
+    // here, and every nebular accessor throws for it instead -- see
+    // requireCovFacForNebular() -- so the stellar-only outputs
+    // computed here stay usable
+    const auto neb = hasNebularEmission() ? sc.nebular() : nullptr;
+    specNeb_.clear();
+    lineLum_.clear();
+    specNebExtinct_.clear();
+    lineLumExtinct_.clear();
     if (neb != nullptr)
     {
-        // covFac_ is drawn only if a nebular grid was present at
-        // construction; a grid installed afterward (via
-        // SimControls::setNebular()) would otherwise turn every nebular
-        // quantity into NaN -- see covFac()'s own comment
-        if (std::isnan(covFac_))
-        {
-            throw std::runtime_error(
-                "Cluster: cannot compute nebular emission for cluster " + std::to_string(uid_) +
-                ", which has no covering factor: it was constructed before its SimControls "
-                "had a nebular emission grid. Construct the cluster after installing the grid.");
-        }
         auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_, covFac_);
         specNeb_ = std::move(nebSpec);
         lineLum_ = std::move(nebLineLum);
@@ -530,7 +548,9 @@ void core::Cluster::computePhot()
         photExtinct_ = filters->phot(ext->wlObs(), specExtinct(), wlFull);
     }
 
-    if (sc.nebular() != nullptr)
+    photNeb_.clear();
+    photNebExtinct_.clear();
+    if (hasNebularEmission())
     {
         photNeb_ = filters->phot(wlFull, specNeb());
         if (ext != nullptr)

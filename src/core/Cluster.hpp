@@ -181,9 +181,12 @@ namespace core
          *   quiet NaN if SimControls::nebular() was null at
          *   construction (no nebular emission is computed, so no
          *   covering factor is drawn). If a nebular grid is installed
-         *   afterward (SimControls::setNebular()), computing this
-         *   cluster's nebular quantities (specNeb(), lineLum(), ...)
-         *   throws std::runtime_error rather than returning NaN.
+         *   afterward (SimControls::setNebular()), every nebular
+         *   accessor (specNeb(), specNebExtinct(), lineLum(),
+         *   lineLumExtinct(), photNeb(), photNebExtinct()) throws
+         *   std::runtime_error for this cluster, whether or not its
+         *   spectra were already computed, rather than returning NaN or
+         *   stale values; its stellar-only outputs are unaffected.
          */
         [[nodiscard]] auto covFac() const { return covFac_; }
 
@@ -331,6 +334,7 @@ namespace core
          */
         [[nodiscard]] auto specNeb() -> const auto&
         {
+            requireCovFacForNebular();
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return specNeb_;
         }
@@ -349,6 +353,7 @@ namespace core
          */
         [[nodiscard]] auto specNebExtinct() -> const auto&
         {
+            requireCovFacForNebular();
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return specNebExtinct_;
         }
@@ -366,6 +371,7 @@ namespace core
          */
         [[nodiscard]] auto lineLum() -> const auto&
         {
+            requireCovFacForNebular();
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return lineLum_;
         }
@@ -382,6 +388,7 @@ namespace core
          */
         [[nodiscard]] auto lineLumExtinct() -> const auto&
         {
+            requireCovFacForNebular();
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return lineLumExtinct_;
         }
@@ -401,6 +408,7 @@ namespace core
          */
         [[nodiscard]] auto photNeb() -> const auto&
         {
+            requireCovFacForNebular();
             if (!photCurrent_) { computePhot(); photCurrent_ = true; }
             return photNeb_;
         }
@@ -423,6 +431,7 @@ namespace core
          */
         [[nodiscard]] auto photNebExtinct() -> const auto&
         {
+            requireCovFacForNebular();
             if (!photCurrent_) { computePhot(); photCurrent_ = true; }
             return photNebExtinct_;
         }
@@ -779,6 +788,28 @@ namespace core
          * applyExtinctionLines().
          */
         void computeSpec();
+
+        /**
+         * @brief Whether this cluster's nebular emission can be computed
+         * @return True if SimControls::nebular() is non-null and covFac_
+         *   is set (not NaN), i.e. a nebular grid was present when this
+         *   cluster was constructed and is still installed
+         * @details Gates the nebular parts of computeSpec()/computePhot().
+         */
+        [[nodiscard]] auto hasNebularEmission() const -> bool;
+
+        /**
+         * @brief Throw if a nebular grid is present but this cluster has no covering factor
+         * @throws std::runtime_error if SimControls::nebular() is non-null
+         *   and covFac_ is NaN -- the cluster was constructed before the
+         *   grid was installed, so it has no covering factor to compute
+         *   nebular emission with (see covFac())
+         * @details
+         * Called first by every nebular accessor, before its cached-value
+         * check, so it fires whether or not the spectra were already
+         * computed (e.g. by spec() before SimControls::setNebular()).
+         */
+        void requireCovFacForNebular() const;
 
         /**
          * @brief Update phot_/photExtinct_/photNeb_/photNebExtinct_ from the current spec_/specExtinct_/specNeb_/specNebExtinct_

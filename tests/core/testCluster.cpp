@@ -868,17 +868,48 @@ static auto testClusterCovFac() -> int
                     "nebular emission off, got " << cluster.covFac() << "\n";
                 return 1;
             }
+            // Compute (and cache) the spectra before the grid exists,
+            // so the first round of checks below hits the cached path;
+            // the second, after another advance(), the uncached one
+            cluster.advance(ageYr);
+            const auto specBefore = cluster.spec();
             controls.setNebular(std::make_unique<nebular::Nebular>(
                 "tests/nebular/assets/nebular_test.h5", "MIST_test", controls));
-            cluster.advance(ageYr);
-            bool threw = false;
-            try { (void)cluster.specNeb(); }
-            catch (const std::runtime_error&) { threw = true; }
-            if (!threw)
+            const auto nebularAccessorsAllThrow = [&cluster]() -> bool
             {
-                std::cerr << "testCluster: covFac: expected specNeb() to throw for a "
-                    "cluster built before a nebular grid was installed\n";
-                return 1;
+                const std::array<std::function<void()>, 6> accessors{
+                    [&cluster]() -> void { (void)cluster.specNeb(); },
+                    [&cluster]() -> void { (void)cluster.specNebExtinct(); },
+                    [&cluster]() -> void { (void)cluster.lineLum(); },
+                    [&cluster]() -> void { (void)cluster.lineLumExtinct(); },
+                    [&cluster]() -> void { (void)cluster.photNeb(); },
+                    [&cluster]() -> void { (void)cluster.photNebExtinct(); } };
+                for (const auto& accessor : accessors)
+                {
+                    bool threw = false;
+                    try { accessor(); }
+                    catch (const std::runtime_error&) { threw = true; }
+                    if (!threw) { return false; }
+                }
+                return true;
+            };
+            for (const bool cached : { true, false })
+            {
+                if (!cached) { cluster.advance(2.0 * ageYr); }
+                if (!nebularAccessorsAllThrow())
+                {
+                    std::cerr << "testCluster: covFac: expected every nebular accessor to "
+                        "throw for a cluster built before a nebular grid was installed ("
+                        << (cached ? "cached" : "uncached") << " spectra)\n";
+                    return 1;
+                }
+                if (cluster.spec().empty() || cluster.phot().empty() ||
+                    (cached && cluster.spec() != specBefore))
+                {
+                    std::cerr << "testCluster: covFac: expected the stellar spec()/phot() "
+                        "to stay usable (" << (cached ? "cached" : "uncached") << ")\n";
+                    return 1;
+                }
             }
         }
 

@@ -26,8 +26,8 @@ import h5py
 import numpy as np
 import pytest
 from astropy import units as u
-from slugpy._slug import Filter, FilterCollection
 
+from slugpy._slug import Filter, FilterCollection
 from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
@@ -269,6 +269,13 @@ def test_clusters_keys(clusters):
     """keys() lists every dataset actually written to the clusters group."""
     expected = {"trial", "uid", "target_mass", "birth_mass", "form_time", "feh", "rng", "A_V"}
     assert set(clusters.keys()) == expected
+
+
+def test_clusters_contains(clusters):
+    """``in`` reports exactly the datasets keys() lists, read from disk or not."""
+    assert "birth_mass" in clusters
+    assert "cov_fac" not in clusters
+    assert 0 not in clusters
 
 
 def test_clusters_unitful_dataset(clusters):

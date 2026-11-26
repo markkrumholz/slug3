@@ -34,8 +34,8 @@ import pathlib
 
 import h5py
 import numpy as np
-
 import pytest
+
 from slugpy import run_sim
 from slugpy._slug import Cluster, FilterIdeal, Nebular, SimControls
 from slugpy.slug_reader import slug_reader
@@ -336,7 +336,7 @@ def test_get_cluster_replays_cov_fac(tmp_path: pathlib.Path) -> None:
     run = _run_nebular_deck(_nebular_deck_with_cov_fac(f'"{COV_FAC_UNIFORM}"'), tmp_path)
     clusters = run.clusters
     assert clusters is not None
-    assert "cov_fac" in clusters.keys()
+    assert "cov_fac" in clusters
     cov_fac = np.asarray(clusters["cov_fac"])
     birth_mass = np.asarray(clusters["birth_mass"])
     uids = np.asarray(clusters["uid"])
@@ -359,7 +359,7 @@ def test_get_cluster_legacy_file_without_cov_fac(tmp_path: pathlib.Path) -> None
     run = _run_nebular_deck(off_deck, tmp_path)
     clusters = run.clusters
     assert clusters is not None
-    assert "cov_fac" not in clusters.keys()
+    assert "cov_fac" not in clusters
     birth_mass = np.asarray(clusters["birth_mass"])
     uids = np.asarray(clusters["uid"])
 
