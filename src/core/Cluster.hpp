@@ -180,7 +180,10 @@ namespace core
          *   whenever this cluster's nebular emission is computed; or a
          *   quiet NaN if SimControls::nebular() was null at
          *   construction (no nebular emission is computed, so no
-         *   covering factor is drawn)
+         *   covering factor is drawn). If a nebular grid is installed
+         *   afterward (SimControls::setNebular()), computing this
+         *   cluster's nebular quantities (specNeb(), lineLum(), ...)
+         *   throws std::runtime_error rather than returning NaN.
          */
         [[nodiscard]] auto covFac() const { return covFac_; }
 

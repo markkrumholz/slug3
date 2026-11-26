@@ -31,7 +31,9 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <toml.hpp>
@@ -853,15 +855,29 @@ static auto testClusterCovFac() -> int
 
     try
     {
-        // Nebular emission off (testClusterExtinct.in sets compute_neb = false)
+        // Nebular emission off (testClusterExtinct.in sets compute_neb =
+        // false): covFac() is NaN. Installing a grid afterward must make
+        // nebular quantities throw rather than come out NaN.
         {
-            const io::SimControls controls(toml::parse_file(inputFileExtinct));
+            io::SimControls controls(toml::parse_file(inputFileExtinct));
             utils::rng().seed(rngSeed);
-            const core::Cluster cluster(0, 1e3, 0.0, controls);
+            core::Cluster cluster(0, 1e3, 0.0, controls);
             if (!std::isnan(cluster.covFac()))
             {
                 std::cerr << "testCluster: covFac: expected covFac() to be NaN with "
                     "nebular emission off, got " << cluster.covFac() << "\n";
+                return 1;
+            }
+            controls.setNebular(std::make_unique<nebular::Nebular>(
+                "tests/nebular/assets/nebular_test.h5", "MIST_test", controls));
+            cluster.advance(ageYr);
+            bool threw = false;
+            try { (void)cluster.specNeb(); }
+            catch (const std::runtime_error&) { threw = true; }
+            if (!threw)
+            {
+                std::cerr << "testCluster: covFac: expected specNeb() to throw for a "
+                    "cluster built before a nebular grid was installed\n";
                 return 1;
             }
         }
@@ -870,6 +886,29 @@ static auto testClusterCovFac() -> int
         inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
         inputDeck.at_path("nebular").as_table()->insert_or_assign(
             "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+        // An rng state recorded with nebular emission off (no
+        // covering-factor draw, standing in for a file written before
+        // covering factors were drawn per cluster, when cov_fac could
+        // only be a number) replays exactly into nebular-on controls
+        // with a delta covering factor: drawing from a delta consumes
+        // no rng state, so the draw sequence is unchanged
+        {
+            const io::SimControls controlsOff(toml::parse_file(inputFileExtinct));
+            const io::SimControls controlsOn(inputDeck);
+            utils::rng().seed(rngSeed);
+            const core::Cluster original(2, 1e4, 0.0, controlsOff);
+            const core::Cluster replayed(2, 1e4, 0.0, controlsOn, original.rngState());
+            if (replayed.starMasses() != original.starMasses() ||
+                replayed.birthMass() != original.birthMass() ||
+                replayed.covFac() != nebular::defaultCovFac)
+            {
+                std::cerr << "testCluster: covFac: expected an rng state recorded with "
+                    "nebular off to replay exactly into nebular-on controls, with covFac() = "
+                    << nebular::defaultCovFac << ", got covFac() = " << replayed.covFac() << "\n";
+                return 1;
+            }
+        }
 
         // Default: a delta distribution at nebular::defaultCovFac
         {

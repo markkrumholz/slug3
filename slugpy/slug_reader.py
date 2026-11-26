@@ -946,8 +946,8 @@ class slug_reader:
         Cluster
             A Cluster built from this cluster's own target_mass and
             rng_state, so its birth-time draws -- birthMass(),
-            starMasses(), feH(), aV() -- are reproduced bit-for-bit;
-            not yet advanced to any output time.
+            starMasses(), feH(), aV(), covFac() -- are reproduced
+            bit-for-bit; not yet advanced to any output time.
 
         Raises
         ------

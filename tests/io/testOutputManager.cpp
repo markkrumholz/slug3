@@ -1984,7 +1984,8 @@ static auto testWriteClusterCovFac() -> int
                         std::vector<std::string> fields;
                         for (std::string word; lineStream >> word;) { fields.push_back(word); }
                         const double readCovFac = std::stod(fields.at(covFacCol));
-                        if (std::abs(readCovFac - covFacs.at(i)) > tol * covFacs.at(i))
+                        if (!std::isfinite(readCovFac) ||
+                            std::abs(readCovFac - covFacs.at(i)) > tol * covFacs.at(i))
                         {
                             std::cerr << "testOutputManager: covFac (" << label << "): "
                                 "clusters.txt row " << i << " cov_fac = " << readCovFac

@@ -29,6 +29,7 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -473,6 +474,17 @@ void core::Cluster::computeSpec()
     const auto neb = sc.nebular();
     if (neb != nullptr)
     {
+        // covFac_ is drawn only if a nebular grid was present at
+        // construction; a grid installed afterward (via
+        // SimControls::setNebular()) would otherwise turn every nebular
+        // quantity into NaN -- see covFac()'s own comment
+        if (std::isnan(covFac_))
+        {
+            throw std::runtime_error(
+                "Cluster: cannot compute nebular emission for cluster " + std::to_string(uid_) +
+                ", which has no covering factor: it was constructed before its SimControls "
+                "had a nebular emission grid. Construct the cluster after installing the grid.");
+        }
         auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_, covFac_);
         specNeb_ = std::move(nebSpec);
         lineLum_ = std::move(nebLineLum);
