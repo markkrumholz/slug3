@@ -26,8 +26,8 @@ import h5py
 import numpy as np
 import pytest
 from astropy import units as u
-
 from slugpy._slug import Filter, FilterCollection
+
 from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader

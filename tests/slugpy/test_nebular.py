@@ -35,9 +35,9 @@ import pathlib
 import h5py
 import numpy as np
 import pytest
+from slugpy._slug import Cluster, FilterIdeal, Nebular, SimControls
 
 from slugpy import run_sim
-from slugpy._slug import Cluster, FilterIdeal, Nebular, SimControls
 from slugpy.slug_reader import slug_reader
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
